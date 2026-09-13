@@ -18,6 +18,25 @@ from app.schemas import MessageRequest
 
 
 KST = ZoneInfo("Asia/Seoul")
+COMMAND_LIST = """🤖 포고봇 명령어
+
+📅 일정
+· 포고봇 오늘 / 내일 / 이번주
+· 포고봇 지금 뭐해 — 현재 진행 중
+· 포고봇 다음 이벤트 — 다음 시작할 일정
+
+⚔️ 종류별
+· 포고봇 레이드 — 앞으로 7일 레이드
+· 포고봇 레이드아워 — 매주 수 18:00
+· 포고봇 스포트라이트 — 매주 목 18:00
+· 포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
+
+ℹ️ 기타
+· 포고봇 리스트 / 도움말 — 이 안내
+· 포고봇 테스트 — 서버 연결 확인
+
+일정은 공식 한국 사이트(pokemongo.com/ko) 기준입니다.
+해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다."""
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -46,7 +65,7 @@ async def lifespan(_: FastAPI):
                 pass
 
 
-app = FastAPI(title="Pokemon GO Kakao Bot", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Pokemon GO Kakao Bot", version="1.2.0", lifespan=lifespan)
 
 
 def get_db():
@@ -88,8 +107,9 @@ def day_window(offset: int = 0) -> tuple[datetime, datetime]:
 def format_event(event: Event) -> str:
     start = event.start_at.astimezone(KST)
     end = event.end_at.astimezone(KST)
+    marker = "🌏" if event.region == "overseas" else "🎮"
     lines = [
-        f"🎮 {event.title}",
+        f"{marker} {event.title}",
         f"⏰ {start.strftime('%m/%d %H:%M')} ~ {end.strftime('%m/%d %H:%M')}",
     ]
     if event.pokemon:
@@ -101,15 +121,29 @@ def format_event(event: Event) -> str:
     return "\n".join(lines)
 
 
+OVERSEAS_HEADER = "───────────────\n🌏 해외 전용 이벤트"
+
+
 def event_reply(title: str, events: list[Event], empty: str) -> str:
-    if not events:
+    """한국에서 참여 가능한 일정을 먼저 보여주고, 해외 전용은 아래에 따로 묶는다."""
+    korean = [event for event in events if event.region != "overseas"]
+    overseas = [event for event in events if event.region == "overseas"]
+    if not korean and not overseas:
         return empty
-    return title + "\n\n" + "\n\n".join(format_event(event) for event in events)
+
+    sections = []
+    if korean:
+        sections.append(title + "\n\n" + "\n\n".join(format_event(e) for e in korean))
+    else:
+        sections.append(f"{title}\n\n한국에서 참여할 수 있는 일정은 없습니다.")
+    if overseas:
+        sections.append(OVERSEAS_HEADER + "\n\n" + "\n\n".join(format_event(e) for e in overseas))
+    return "\n\n".join(sections)
 
 
 @app.get("/")
 def root():
-    return {"name": "Pokemon GO Kakao Bot", "status": "running", "version": "1.0.0"}
+    return {"name": "Pokemon GO Kakao Bot", "status": "running", "version": app.version}
 
 
 @app.get("/health")
@@ -173,17 +207,8 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
 
     if "포고봇 테스트" in msg:
         return {"reply": "✅ Pokemon GO 봇 서버 연결 정상입니다."}
-    if "포고봇 도움말" in msg:
-        return {
-            "reply": (
-                "🤖 Pokemon GO 봇\n\n"
-                "포고봇 오늘 / 내일 / 이번주\n"
-                "포고봇 레이드 / 레이드아워\n"
-                "포고봇 스포트라이트 / 커뮤\n"
-                "포고봇 다음 이벤트 / 지금 뭐해\n"
-                "포고봇 테스트"
-            )
-        }
+    if "포고봇 리스트" in msg or "포고봇 도움말" in msg:
+        return {"reply": COMMAND_LIST}
     if "포고봇 지금" in msg:
         return {
             "reply": event_reply(

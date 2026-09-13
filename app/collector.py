@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -10,13 +11,34 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.event_service import upsert_event
+from app.korean_source import fetch_korean_records
 from app.models import CollectRun, utc_now
 from app.schemas import CollectedEvents
 from app.source_fetcher import fetch_event_candidates
 
 
 KST = ZoneInfo("Asia/Seoul")
-ALLOWED_DOMAINS = ["pokemongolive.com", "leekduck.com"]
+LOGGER = logging.getLogger(__name__)
+ALLOWED_DOMAINS = ["pokemongo.com", "pokemongolive.com", "leekduck.com"]
+
+# 공식 한국 사이트에 실리지 않는 주간 반복 일정을 Leek Duck에서 채울 때 쓰는 표기 사전.
+KOREAN_GLOSSARY = """
+Raid Hour -> 레이드아워 (매주 수요일 18:00~19:00)
+Pokemon Spotlight Hour -> 스포트라이트아워 (매주 목요일 18:00~19:00)
+Max Monday -> 맥스먼데이 (매주 월요일)
+Mega Raids -> 메가 레이드
+5-star Raid Battles -> 별5 레이드배틀
+Shadow Raids -> 그림자 레이드
+GO Battle League -> GO배틀리그
+Community Day -> 커뮤니티 데이
+Community Day Classic -> 커뮤니티 데이(복각)
+Raid Day / Super Mega Raid Day -> 레이드 데이 / 슈퍼 메가 레이드 데이
+Max Battle Day -> 맥스배틀 데이
+Hatch Day -> 부화데이
+Catch Mastery / Mastery Series -> 마스터리 시리즈
+GO Pass -> GO패스
+Season -> 시즌
+""".strip()
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
@@ -47,15 +69,37 @@ def _collect_with_gemini(prompt: str, source_text: str) -> CollectedEvents:
     structure_prompt = f"""
 {prompt}
 
-Convert the public schedule records below into the requested event schema.
+Convert the source records below into the requested event schema.
 
-Use only facts and source URLs present in the records. Do not invent missing
-dates, times, bonuses, Pokemon, or URLs. Return an empty events array when the
-records contain no confirmed matching events. Preserve the supplied timestamps
-and URLs exactly. Map each source type to the closest category in the schema.
-Use confidence 0.75 because Leek Duck is a secondary source.
+Source priority:
+1. "공식 한국 뉴스" blocks are the official Korean site and outrank everything else.
+   Their bodies state schedules as "한국시간 2026년 9월 29일 10:00부터 10월 5일 20:00까지";
+   read those literally as Asia/Seoul times. One article may describe several events
+   (for example 파트1~파트4) - emit each dated schedule as its own event.
+2. "Leek Duck 보조 일정" blocks only fill in what the official Korean site never
+   publishes: 레이드아워, 스포트라이트아워, 맥스먼데이 and the weekly raid boss and
+   GO배틀리그 rotations. Their timestamps already carry a +09:00 offset - copy them.
 
-Public schedule records:
+Titles must be Korean. When an event appears in a 공식 한국 뉴스 block, reuse that
+article's exact Korean wording, including the official Korean Pokemon names. For an
+event that exists only in a Leek Duck block, translate it with this glossary and use
+official Korean Pokemon names:
+{KOREAN_GLOSSARY}
+
+Set region for every event:
+- "kr" when players in Korea can take part. Worldwide events that run at local time
+  (레이드아워, 스포트라이트아워, 맥스먼데이, 커뮤니티 데이, raid rotations) are "kr".
+- "overseas" only for in-person or ticketed events held outside Korea, such as
+  "Pokemon GO 와일드 에리어: 센다이, 도호쿠" or a GO Fest city stop abroad.
+  An in-person event held in Korea stays "kr".
+
+If the same event appears in both sources, emit it once, using the Korean title and
+the official pokemongo.com URL. Use only facts and source URLs present in the
+records; never invent dates, times, bonuses, Pokemon, or URLs. Return an empty
+events array when nothing matches. Use confidence 0.9 for events taken from 공식
+한국 뉴스 and 0.75 for events taken only from Leek Duck.
+
+Source records:
 {source_text}
 """.strip()
     structured = client.models.generate_content(
@@ -160,11 +204,27 @@ def _collect_with_openai(prompt: str) -> CollectedEvents:
     return response.output_parsed
 
 
+def build_source_text(now: datetime, until: datetime) -> str:
+    """공식 한국 뉴스를 앞에, Leek Duck 보조 일정을 뒤에 붙인 소스 텍스트."""
+    korean = fetch_korean_records(now)
+    sections = [f"## 공식 한국 뉴스 (pokemongo.com/ko) - 1순위\n\n{korean}"]
+    try:
+        leekduck = fetch_event_candidates(now, until)
+    except Exception as exc:  # 보조 소스는 실패해도 수집을 막지 않는다
+        LOGGER.warning("Leek Duck 보조 소스를 건너뜁니다: %s", exc)
+    else:
+        sections.append(
+            "## Leek Duck 보조 일정 (leekduck.com) - 공식 한국 사이트에 없는 "
+            f"주간 반복 일정 보완용\n\n{leekduck}"
+        )
+    return "\n\n".join(sections)
+
+
 def _collect_from_provider(provider: str, prompt: str) -> CollectedEvents:
     if provider == "gemini":
         now = datetime.now(KST)
         until = now + timedelta(days=60)
-        return _collect_with_gemini(prompt, fetch_event_candidates(now, until))
+        return _collect_with_gemini(prompt, build_source_text(now, until))
     if provider == "groq":
         return _collect_with_groq(prompt)
     return _collect_with_openai(prompt)
@@ -184,16 +244,16 @@ def collect_events(db: Session, days: int = 30) -> CollectRun:
     now = datetime.now(KST)
     until = now + timedelta(days=days)
     prompt = f"""
-Search for confirmed Pokemon GO events that are active or begin between
-{now.isoformat()} and {until.isoformat()} for players in South Korea.
+Collect confirmed Pokemon GO events that are running or begin between
+{now.isoformat()} and {until.isoformat()}, written for players in South Korea.
 
-Use official Pokemon GO pages as the primary source and Leek Duck only as a
-secondary source. Return each distinct event once. Convert local-time events to
-Asia/Seoul and include an explicit UTC offset in start_at and end_at. Do not
-invent dates, bonuses, Pokemon, or URLs. Exclude unconfirmed rumors and events
-whose end time is before the start of this collection window. Choose the closest
-category from the supplied schema. Confidence should reflect source quality and
-date certainty; official confirmed schedules should normally be at least 0.8.
+The official Korean site pokemongo.com/ko is the primary source; Leek Duck is
+secondary and only covers what the official Korean site never publishes. Return
+each distinct event once, with a Korean title. Express start_at and end_at in
+Asia/Seoul with an explicit UTC offset. Do not invent dates, bonuses, Pokemon, or
+URLs. Exclude unconfirmed rumors and events that end before this window starts.
+Choose the closest category from the supplied schema, and set region to "kr" for
+anything playable in Korea or "overseas" for in-person events held abroad.
 """.strip()
 
     try:

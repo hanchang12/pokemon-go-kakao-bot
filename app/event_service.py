@@ -30,6 +30,7 @@ def upsert_event(db: Session, item: CollectedEvent) -> tuple[Event, bool]:
 
     event.title = item.title.strip()
     event.category = item.category
+    event.region = item.region
     event.start_at = item.start_at
     event.end_at = item.end_at
     event.description = item.description.strip()

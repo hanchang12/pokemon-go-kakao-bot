@@ -20,6 +20,7 @@ Base = declarative_base()
 
 EVENT_COLUMN_MIGRATIONS = {
     "external_key": "VARCHAR(64)",
+    "region": "VARCHAR(20) DEFAULT 'kr'",
     "pokemon": "JSON",
     "bonuses": "JSON",
     "confidence": "FLOAT",

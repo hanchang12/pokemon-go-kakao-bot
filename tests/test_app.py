@@ -103,3 +103,69 @@ def test_collection_provider_error_is_safe_and_actionable(monkeypatch):
         "upstream request failed for [redacted]"
     )
     assert secret not in response.text
+
+
+def _add(title, *, region="kr", category="event", hours_from_now=1, duration=3):
+    start = datetime.now(KST) + timedelta(hours=hours_from_now)
+    item = CollectedEvent(
+        title=title,
+        category=category,
+        region=region,
+        start_at=start,
+        end_at=start + timedelta(hours=duration),
+        source_name="공식 한국 뉴스",
+        source_url="https://pokemongo.com/ko/news/sample",
+        confidence=0.9,
+    )
+    with SessionLocal() as db:
+        upsert_event(db, item)
+        db.commit()
+
+
+def test_overseas_events_are_grouped_under_korean_ones():
+    _add("수확 축제: 과사삭벌레 모으기")
+    _add("Pokémon GO 와일드 에리어: 센다이, 도호쿠", region="overseas")
+
+    reply = message("포고봇 이번주").json()["reply"]
+    korean_at = reply.index("수확 축제: 과사삭벌레 모으기")
+    header_at = reply.index("🌏 해외 전용 이벤트")
+    overseas_at = reply.index("와일드 에리어")
+
+    # 한국 일정이 먼저, 그 아래에 해외 전용 묶음이 온다
+    assert korean_at < header_at < overseas_at
+    assert reply.startswith("📅")
+
+
+def test_overseas_only_week_still_shows_korean_section_note():
+    _add("Pokémon GO 와일드 에리어: 센다이, 도호쿠", region="overseas")
+
+    reply = message("포고봇 이번주").json()["reply"]
+
+    assert "한국에서 참여할 수 있는 일정은 없습니다." in reply
+    assert "🌏 해외 전용 이벤트" in reply
+
+
+def test_overseas_event_is_marked_in_single_event_reply():
+    _add("Pokémon GO 와일드 에리어: 센다이, 도호쿠", region="overseas")
+
+    reply = message("포고봇 다음 이벤트").json()["reply"]
+
+    assert reply.startswith("🌏")
+
+
+def test_korean_event_keeps_plain_marker():
+    _add("수확 축제: 과사삭벌레 모으기")
+
+    reply = message("포고봇 다음 이벤트").json()["reply"]
+
+    assert reply.startswith("🎮")
+
+
+def test_command_list_is_served_by_both_names():
+    listed = message("포고봇 리스트").json()["reply"]
+    helped = message("포고봇 도움말").json()["reply"]
+
+    assert listed == helped
+    for command in ["포고봇 오늘", "포고봇 레이드아워", "포고봇 스포트라이트", "포고봇 테스트"]:
+        assert command in listed
+    assert "🌏" in listed

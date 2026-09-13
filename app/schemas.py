@@ -24,9 +24,13 @@ class MessageRequest(BaseModel):
     message: str
 
 
+EventRegion = Literal["kr", "overseas"]
+
+
 class CollectedEvent(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     category: EventCategory = "event"
+    region: EventRegion = "kr"
     start_at: datetime
     end_at: datetime
     description: str = ""

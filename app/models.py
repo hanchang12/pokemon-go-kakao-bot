@@ -16,6 +16,7 @@ class Event(Base):
     external_key = Column(String(64), unique=True, index=True, nullable=True)
     title = Column(String(200), nullable=False)
     category = Column(String(50), nullable=False, default="event")
+    region = Column(String(20), nullable=False, default="kr")
     start_at = Column(DateTime(timezone=True), nullable=False)
     end_at = Column(DateTime(timezone=True), nullable=False)
     description = Column(Text)
