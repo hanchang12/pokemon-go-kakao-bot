@@ -113,12 +113,10 @@ def test_nvidia_collection_uses_openai_compatible_endpoint(monkeypatch):
     result = collector._collect_with_nvidia("find events", "source records")
 
     assert result.events[0].title == "테스트 이벤트"
-    assert created_with == {
-        "api_key": "test-nvidia-key",
-        "base_url": "https://integrate.api.nvidia.com/v1",
-    }
+    assert created_with["api_key"] == "test-nvidia-key"
+    assert created_with["base_url"] == "https://integrate.api.nvidia.com/v1"
     request = completions.calls[0]
-    assert request["model"] == "nvidia/nemotron-3.5-lightning-30b-a3b"
+    assert request["model"] == "meta/llama-3.1-70b-instruct"
     assert request["response_format"] == {"type": "json_object"}
     assert "source records" in request["messages"][-1]["content"]
 

@@ -199,6 +199,10 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
     client = OpenAI(
         api_key=os.environ["NVIDIA_API_KEY"],
         base_url=NVIDIA_BASE_URL,
+        # A hung/slow NVIDIA call should fail fast with a clear timeout error
+        # instead of running past Railway's edge timeout and surfacing as an
+        # opaque "upstream error" 502 with no detail.
+        timeout=90.0,
     )
     structure_prompt = _build_structure_prompt(prompt, source_text)
     schema = json.dumps(
@@ -221,7 +225,7 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
 
     for attempt in range(2):
         response = client.chat.completions.create(
-            model=os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
+            model=os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct"),
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.1,
