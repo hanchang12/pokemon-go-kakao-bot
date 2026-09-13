@@ -99,6 +99,50 @@ def test_groq_collection_retries_invalid_schema(monkeypatch):
     assert "did not match" in completions.calls[1]["messages"][-1]["content"]
 
 
+def test_nvidia_collection_uses_openai_compatible_endpoint(monkeypatch):
+    client, completions = fake_client([json.dumps(VALID_EVENTS)])
+    created_with = {}
+
+    def openai_factory(**kwargs):
+        created_with.update(kwargs)
+        return client
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", openai_factory)
+
+    result = collector._collect_with_nvidia("find events", "source records")
+
+    assert result.events[0].title == "테스트 이벤트"
+    assert created_with == {
+        "api_key": "test-nvidia-key",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+    }
+    request = completions.calls[0]
+    assert request["model"] == "meta/llama-3.3-70b-instruct"
+    assert request["response_format"] == {"type": "json_object"}
+    assert "source records" in request["messages"][-1]["content"]
+
+
+def test_nvidia_collection_retries_invalid_schema(monkeypatch):
+    client, completions = fake_client(
+        [json.dumps({"events": [{"title": "missing fields"}]}), json.dumps(VALID_EVENTS)]
+    )
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
+
+    result = collector._collect_with_nvidia("find events", "source records")
+
+    assert result.events[0].title == "테스트 이벤트"
+    assert len(completions.calls) == 2
+
+
+def test_nvidia_provider_requires_api_key(monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="NVIDIA_API_KEY"):
+        collector._require_provider_key("nvidia")
+
+
 def test_gemini_collection_searches_then_structures(monkeypatch):
     models = FakeGeminiModels()
     client = SimpleNamespace(models=models)

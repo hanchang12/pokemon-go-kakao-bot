@@ -90,6 +90,7 @@ def safe_error_detail(exc: Exception) -> str:
         "GEMINI_API_KEY",
         "GROQ_API_KEY",
         "OPENAI_API_KEY",
+        "NVIDIA_API_KEY",
         "ADMIN_TOKEN",
     ):
         secret = os.getenv(name)

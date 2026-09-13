@@ -21,6 +21,7 @@ KST = ZoneInfo("Asia/Seoul")
 LOGGER = logging.getLogger(__name__)
 ALLOWED_DOMAINS = ["pokemongo.com", "pokemongolive.com", "poketory.com", "pgsharp-info.com"]
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 def _provider_name() -> str:
@@ -34,8 +35,10 @@ def _require_provider_key(provider: str) -> None:
         raise RuntimeError("GROQ_API_KEY is not configured")
     if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not configured")
-    if provider not in {"gemini", "groq", "openai"}:
-        raise RuntimeError("AI_PROVIDER must be 'gemini', 'groq', or 'openai'")
+    if provider == "nvidia" and not os.getenv("NVIDIA_API_KEY"):
+        raise RuntimeError("NVIDIA_API_KEY is not configured")
+    if provider not in {"gemini", "groq", "openai", "nvidia"}:
+        raise RuntimeError("AI_PROVIDER must be 'gemini', 'groq', 'openai', or 'nvidia'")
 
 
 def _gemini_model() -> str:
@@ -45,9 +48,8 @@ def _gemini_model() -> str:
     return configured
 
 
-def _collect_with_gemini(prompt: str, source_text: str) -> CollectedEvents:
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    structure_prompt = f"""
+def _build_structure_prompt(prompt: str, source_text: str) -> str:
+    return f"""
 {prompt}
 
 Convert the source records below into the requested event schema.
@@ -83,6 +85,11 @@ events array when nothing matches. Use confidence 0.9 for events taken from 공�
 Source records:
 {source_text}
 """.strip()
+
+
+def _collect_with_gemini(prompt: str, source_text: str) -> CollectedEvents:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    structure_prompt = _build_structure_prompt(prompt, source_text)
     structured = client.models.generate_content(
         model=_gemini_model(),
         contents=structure_prompt,
@@ -185,6 +192,64 @@ def _collect_with_openai(prompt: str) -> CollectedEvents:
     return response.output_parsed
 
 
+def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
+    # NVIDIA NIM's chat completions endpoint is OpenAI-compatible but has no
+    # built-in web search, so it structures the source text we already fetched
+    # ourselves - the same self-fetched-sources approach as the Gemini path.
+    client = OpenAI(
+        api_key=os.environ["NVIDIA_API_KEY"],
+        base_url=NVIDIA_BASE_URL,
+    )
+    structure_prompt = _build_structure_prompt(prompt, source_text)
+    schema = json.dumps(
+        CollectedEvents.model_json_schema(), ensure_ascii=False, separators=(",", ":")
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Respond with one JSON object only, without markdown or commentary "
+                "outside JSON. The JSON must match the supplied schema exactly."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"{structure_prompt}\n\nRequired JSON Schema:\n{schema}",
+        },
+    ]
+    last_error: ValidationError | None = None
+
+    for attempt in range(2):
+        response = client.chat.completions.create(
+            model=os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        if not content:
+            raise RuntimeError("NVIDIA returned no event data")
+        try:
+            return CollectedEvents.model_validate_json(content)
+        except ValidationError as exc:
+            last_error = exc
+            if attempt == 0:
+                messages.extend(
+                    [
+                        {"role": "assistant", "content": content},
+                        {
+                            "role": "user",
+                            "content": (
+                                "The previous JSON did not match the required schema. "
+                                f"Correct it and return JSON only. Validation error: {exc}"
+                            ),
+                        },
+                    ]
+                )
+
+    raise RuntimeError(f"NVIDIA returned invalid event data: {last_error}")
+
+
 def build_source_text(now: datetime) -> str:
     """공식 한국 뉴스를 앞에, 한국 커뮤니티 일정을 뒤에 붙인 소스 텍스트."""
     korean = fetch_korean_records(now)
@@ -203,8 +268,9 @@ def build_source_text(now: datetime) -> str:
 
 def _collect_from_provider(provider: str, prompt: str) -> CollectedEvents:
     if provider == "gemini":
-        now = datetime.now(KST)
-        return _collect_with_gemini(prompt, build_source_text(now))
+        return _collect_with_gemini(prompt, build_source_text(datetime.now(KST)))
+    if provider == "nvidia":
+        return _collect_with_nvidia(prompt, build_source_text(datetime.now(KST)))
     if provider == "groq":
         return _collect_with_groq(prompt)
     return _collect_with_openai(prompt)
