@@ -41,7 +41,10 @@ class LeekDuckEventParser(HTMLParser):
             self.current = SourceEvent(
                 occurrence_id=occurrence_id,
                 event_type=values.get("data-event-type") or "event",
-                start_at=values.get("data-event-start-date"),
+                start_at=(
+                    values.get("data-event-start-date")
+                    or values.get("data-event-start-date-check")
+                ),
                 end_at=values.get("data-event-end-date"),
                 local_time=values.get("data-event-local-time") == "true",
             )
