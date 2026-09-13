@@ -29,7 +29,7 @@
 
 실제 값은 저장소에 커밋하지 마세요. `.env.example`은 이름과 형식만 보여주는 예시입니다.
 
-Groq로 전환하려면 `AI_PROVIDER=groq`, `GROQ_API_KEY`, `GROQ_MODEL`을 설정합니다. OpenAI로 전환하려면 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정합니다. NVIDIA(NIM)로 전환하려면 `AI_PROVIDER=nvidia`, `NVIDIA_API_KEY`, 필요하면 `NVIDIA_MODEL`(기본값 `meta/llama-3.3-70b-instruct`)을 설정합니다. NVIDIA NIM은 자체 웹 검색 기능이 없어서, Gemini와 마찬가지로 봇이 직접 가져온 공식 한국 뉴스 + 한국 커뮤니티 소스 텍스트를 구조화하는 방식으로 동작합니다. 선택하지 않은 공급자의 API 키는 필요하지 않습니다.
+Groq로 전환하려면 `AI_PROVIDER=groq`, `GROQ_API_KEY`, `GROQ_MODEL`을 설정합니다. OpenAI로 전환하려면 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정합니다. NVIDIA(NIM)로 전환하려면 `AI_PROVIDER=nvidia`, `NVIDIA_API_KEY`, 필요하면 `NVIDIA_MODEL`(기본값 `nvidia/nemotron-3.5-lightning-30b-a3b`)을 설정합니다. NVIDIA NIM 모델은 종종 서비스 종료(EOL)되니, 수집이 `410`/`model ... no longer available` 오류로 실패하면 [build.nvidia.com](https://build.nvidia.com/models)에서 현재 제공 중인 모델 ID로 `NVIDIA_MODEL`을 갱신하세요. NVIDIA NIM은 자체 웹 검색 기능이 없어서, Gemini와 마찬가지로 봇이 직접 가져온 공식 한국 뉴스 + 한국 커뮤니티 소스 텍스트를 구조화하는 방식으로 동작합니다. 선택하지 않은 공급자의 API 키는 필요하지 않습니다.
 
 ## 배포 후 최초 수집
 

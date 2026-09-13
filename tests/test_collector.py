@@ -118,7 +118,7 @@ def test_nvidia_collection_uses_openai_compatible_endpoint(monkeypatch):
         "base_url": "https://integrate.api.nvidia.com/v1",
     }
     request = completions.calls[0]
-    assert request["model"] == "meta/llama-3.3-70b-instruct"
+    assert request["model"] == "nvidia/nemotron-3.5-lightning-30b-a3b"
     assert request["response_format"] == {"type": "json_object"}
     assert "source records" in request["messages"][-1]["content"]
 
