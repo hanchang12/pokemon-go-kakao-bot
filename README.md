@@ -1,6 +1,6 @@
 # Pokemon GO Kakao Bot
 
-카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. OpenAI Responses API의 Web Search와 Structured Outputs로 한국 기준 30일 일정을 수집하고, 동일 이벤트는 중복 저장하지 않고 갱신합니다.
+카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. 기본 수집기인 Groq Compound의 웹 검색으로 한국 기준 30일 일정을 수집하고, 동일 이벤트는 중복 저장하지 않고 갱신합니다. 필요하면 환경 변수만 바꿔 OpenAI 수집기로 전환할 수 있습니다.
 
 ## 지원 명령어
 
@@ -14,11 +14,14 @@
 
 기존 `DATABASE_URL`에 다음 값을 추가합니다.
 
-- `OPENAI_API_KEY`: OpenAI API 키
-- `OPENAI_MODEL`: 기본값 `gpt-5.4-mini`
+- `AI_PROVIDER`: 기본값 `groq`
+- `GROQ_API_KEY`: Groq Console에서 발급한 API 키
+- `GROQ_MODEL`: 기본값 `groq/compound`
 - `ADMIN_TOKEN`: 관리자 API에 사용할 충분히 긴 임의 문자열
 
 실제 값은 저장소에 커밋하지 마세요. `.env.example`은 이름과 형식만 보여주는 예시입니다.
+
+나중에 OpenAI로 전환하려면 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정합니다. Groq를 사용할 때는 `OPENAI_API_KEY`가 필요하지 않습니다.
 
 ## 배포 후 최초 수집
 
@@ -34,7 +37,7 @@ Railway에서 같은 저장소를 사용하는 Cron 서비스를 하나 더 만�
 python -m app.collect_once
 ```
 
-한국 시간 06:00과 18:00에 실행하려면 UTC cron 표현식은 `0 21,9 * * *`입니다. Cron 서비스에도 웹 서비스와 동일한 `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` 환경 변수가 필요합니다.
+한국 시간 06:00과 18:00에 실행하려면 UTC cron 표현식은 `0 21,9 * * *`입니다. Cron 서비스에도 웹 서비스와 동일한 `DATABASE_URL`, `AI_PROVIDER`, 선택한 공급자의 API 키와 모델 환경 변수가 필요합니다.
 
 ## 로컬 실행과 테스트
 
@@ -44,4 +47,4 @@ pytest -q
 uvicorn app.main:app --reload
 ```
 
-`DATABASE_URL`이 없으면 로컬 SQLite 파일을 사용합니다. 실제 일정 수집에는 `OPENAI_API_KEY`가 필요합니다.
+`DATABASE_URL`이 없으면 로컬 SQLite 파일을 사용합니다. 기본 설정으로 실제 일정을 수집하려면 `GROQ_API_KEY`가 필요합니다.
