@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Event, utc_now
@@ -13,6 +13,11 @@ def make_external_key(event: CollectedEvent) -> str:
         [event.title.strip().casefold(), event.category, event.start_at.isoformat()]
     )
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def remove_test_events(db: Session) -> int:
+    result = db.execute(delete(Event).where(Event.source_name == "TEST"))
+    return int(result.rowcount or 0)
 
 
 def upsert_event(db: Session, item: CollectedEvent) -> tuple[Event, bool]:

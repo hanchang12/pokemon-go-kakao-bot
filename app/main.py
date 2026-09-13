@@ -1,5 +1,8 @@
+import asyncio
 import hmac
+import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,14 +11,42 @@ from sqlalchemy.orm import Session
 
 from app.collector import collect_events
 from app.db import SessionLocal, ensure_schema
-from app.event_service import current_events, events_between, next_event, upsert_event
+from app.event_service import current_events, events_between, next_event, remove_test_events
 from app.models import Event
-from app.schemas import CollectedEvent, MessageRequest
+from app.scheduler import auto_collect_enabled, collection_loop
+from app.schemas import MessageRequest
 
 
 KST = ZoneInfo("Asia/Seoul")
-app = FastAPI(title="Pokemon GO Kakao Bot", version="1.0.0")
+LOGGER = logging.getLogger(__name__)
 ensure_schema()
+
+
+def clean_legacy_test_events() -> int:
+    with SessionLocal() as db:
+        deleted = remove_test_events(db)
+        db.commit()
+    if deleted:
+        LOGGER.info("removed %s legacy test events", deleted)
+    return deleted
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    clean_legacy_test_events()
+    task = asyncio.create_task(collection_loop()) if auto_collect_enabled() else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="Pokemon GO Kakao Bot", version="1.1.0", lifespan=lifespan)
 
 
 def get_db():
@@ -93,24 +124,6 @@ def db_check(db: Session = Depends(get_db)):
         return {"status": "ok", "database": "connected"}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
-@app.post("/api/admin/seed-test", dependencies=[Depends(require_admin)])
-def seed_test(db: Session = Depends(get_db)):
-    start, _ = day_window()
-    item = CollectedEvent(
-        title="테스트 레이드아워",
-        category="raid_hour",
-        start_at=start + timedelta(hours=18),
-        end_at=start + timedelta(hours=19),
-        description="Pokemon GO 봇 테스트용 이벤트",
-        source_name="TEST",
-        source_url="https://pokemongolive.com/",
-        confidence=1.0,
-    )
-    event, created = upsert_event(db, item)
-    db.commit()
-    return {"status": "ok", "event_id": event.id, "created": created, "title": event.title}
 
 
 @app.post("/api/admin/collect", dependencies=[Depends(require_admin)])

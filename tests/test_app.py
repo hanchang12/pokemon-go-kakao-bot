@@ -30,23 +30,30 @@ def message(text: str):
     )
 
 
-def test_seed_is_idempotent():
-    headers = {"x-admin-token": "test-admin-token"}
-    first = client.post("/api/admin/seed-test", headers=headers)
-    second = client.post("/api/admin/seed-test", headers=headers)
-
-    assert first.status_code == 200
-    assert first.json()["created"] is True
-    assert second.status_code == 200
-    assert second.json()["created"] is False
-    assert client.get("/api/events/today").json()["count"] == 1
-
-
 def test_admin_endpoint_rejects_bad_token():
     response = client.post(
-        "/api/admin/seed-test", headers={"x-admin-token": "wrong"}
+        "/api/admin/collect", headers={"x-admin-token": "wrong"}
     )
     assert response.status_code == 401
+
+
+def test_legacy_test_events_are_removed():
+    start = datetime.now(KST) + timedelta(hours=1)
+    with SessionLocal() as db:
+        db.add(
+            main_module.Event(
+                title="테스트 레이드아워",
+                category="raid_hour",
+                start_at=start,
+                end_at=start + timedelta(hours=1),
+                source_name="TEST",
+            )
+        )
+        db.commit()
+
+    assert main_module.clean_legacy_test_events() == 1
+    with SessionLocal() as db:
+        assert db.query(main_module.Event).count() == 0
 
 
 def test_category_command_and_next_event():
