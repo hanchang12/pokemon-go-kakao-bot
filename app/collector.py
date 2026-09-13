@@ -225,7 +225,7 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
 
     for attempt in range(2):
         response = client.chat.completions.create(
-            model=os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct"),
+            model=os.getenv("NVIDIA_MODEL", "google/gemma-4-31b-it"),
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.1,

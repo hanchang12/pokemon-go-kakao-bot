@@ -116,7 +116,7 @@ def test_nvidia_collection_uses_openai_compatible_endpoint(monkeypatch):
     assert created_with["api_key"] == "test-nvidia-key"
     assert created_with["base_url"] == "https://integrate.api.nvidia.com/v1"
     request = completions.calls[0]
-    assert request["model"] == "meta/llama-3.1-70b-instruct"
+    assert request["model"] == "google/gemma-4-31b-it"
     assert request["response_format"] == {"type": "json_object"}
     assert "source records" in request["messages"][-1]["content"]
 
