@@ -105,7 +105,16 @@ def test_collection_provider_error_is_safe_and_actionable(monkeypatch):
     assert secret not in response.text
 
 
-def _add(title, *, region="kr", category="event", hours_from_now=1, duration=3):
+def _add(
+    title,
+    *,
+    region="kr",
+    category="event",
+    hours_from_now=1,
+    duration=3,
+    source_name="공식 한국 뉴스",
+    source_url="https://pokemongo.com/ko/news/sample",
+):
     start = datetime.now(KST) + timedelta(hours=hours_from_now)
     item = CollectedEvent(
         title=title,
@@ -113,8 +122,8 @@ def _add(title, *, region="kr", category="event", hours_from_now=1, duration=3):
         region=region,
         start_at=start,
         end_at=start + timedelta(hours=duration),
-        source_name="공식 한국 뉴스",
-        source_url="https://pokemongo.com/ko/news/sample",
+        source_name=source_name,
+        source_url=source_url,
         confidence=0.9,
     )
     with SessionLocal() as db:
@@ -159,6 +168,29 @@ def test_korean_event_keeps_plain_marker():
     reply = message("포고봇 다음 이벤트").json()["reply"]
 
     assert reply.startswith("🎮")
+
+
+def test_official_korean_source_is_listed_before_other_sources():
+    _add(
+        "메가 레이드: 메가독침붕",
+        hours_from_now=2,
+        source_name="Leek Duck",
+        source_url="https://leekduck.com/events/mega-beedrill/",
+    )
+    _add(
+        "주간 릴레이 시간제한 리서치: 파트1",
+        hours_from_now=1,
+        source_name="공식 한국 뉴스",
+        source_url="https://pokemongo.com/ko/news/weekly-branching-tr-korea-2026",
+    )
+
+    reply = message("포고봇 이번주").json()["reply"]
+    header_at = reply.index("🇰🇷 한국 이벤트")
+    official_at = reply.index("주간 릴레이 시간제한 리서치: 파트1")
+    other_at = reply.index("메가 레이드: 메가독침붕")
+
+    # 공식 한국 뉴스 출처가 먼저, 다른 출처(Leek Duck 등)가 그 다음
+    assert header_at < official_at < other_at
 
 
 def test_command_list_is_served_by_both_names():

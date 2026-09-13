@@ -121,19 +121,26 @@ def format_event(event: Event) -> str:
     return "\n".join(lines)
 
 
+KOREAN_HEADER = "🇰🇷 한국 이벤트"
 OVERSEAS_HEADER = "───────────────\n🌏 해외 전용 이벤트"
+OFFICIAL_KOREAN_SOURCE = "공식 한국 뉴스"
 
 
 def event_reply(title: str, events: list[Event], empty: str) -> str:
-    """한국에서 참여 가능한 일정을 먼저 보여주고, 해외 전용은 아래에 따로 묶는다."""
-    korean = [event for event in events if event.region != "overseas"]
+    """한국 일정은 공식 한국 뉴스 소스를 먼저, 다른 소스를 그 다음에 보여주고, 해외 전용은 아래에 따로 묶는다."""
+    korean = sorted(
+        (event for event in events if event.region != "overseas"),
+        key=lambda e: e.source_name != OFFICIAL_KOREAN_SOURCE,
+    )
     overseas = [event for event in events if event.region == "overseas"]
     if not korean and not overseas:
         return empty
 
     sections = []
     if korean:
-        sections.append(title + "\n\n" + "\n\n".join(format_event(e) for e in korean))
+        sections.append(
+            title + "\n\n" + KOREAN_HEADER + "\n\n" + "\n\n".join(format_event(e) for e in korean)
+        )
     else:
         sections.append(f"{title}\n\n한국에서 참여할 수 있는 일정은 없습니다.")
     if overseas:
