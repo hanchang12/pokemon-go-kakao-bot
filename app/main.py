@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.collector import collect_events
 from app.db import SessionLocal, ensure_schema
-from app.event_service import current_events, events_between, next_event, remove_test_events
+from app.event_service import (
+    current_events,
+    delete_duplicate_events,
+    delete_event,
+    events_between,
+    next_event,
+    remove_test_events,
+)
 from app.models import Event
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
@@ -186,6 +193,21 @@ def run_collection(days: int = 30, db: Session = Depends(get_db)):
         "inserted": run.inserted_count,
         "updated": run.updated_count,
     }
+
+
+@app.delete("/api/admin/events/dedupe", dependencies=[Depends(require_admin)])
+def dedupe_events(db: Session = Depends(get_db)):
+    removed = delete_duplicate_events(db)
+    db.commit()
+    return {"status": "completed", "removed": removed}
+
+
+@app.delete("/api/admin/events/{event_id}", dependencies=[Depends(require_admin)])
+def delete_event_by_id(event_id: int, db: Session = Depends(get_db)):
+    if not delete_event(db, event_id):
+        raise HTTPException(status_code=404, detail="event not found")
+    db.commit()
+    return {"status": "deleted", "id": event_id}
 
 
 @app.get("/api/events/today")

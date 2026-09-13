@@ -1,8 +1,8 @@
 import hashlib
 from datetime import datetime
 
-from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, delete, select
+from sqlalchemy.orm import Session, aliased
 
 from app.models import Event, utc_now
 from app.schemas import CollectedEvent
@@ -20,6 +20,37 @@ def make_external_key(event: CollectedEvent) -> str:
 
 def remove_test_events(db: Session) -> int:
     result = db.execute(delete(Event).where(Event.source_name == "TEST"))
+    return int(result.rowcount or 0)
+
+
+def delete_event(db: Session, event_id: int) -> bool:
+    result = db.execute(delete(Event).where(Event.id == event_id))
+    db.flush()
+    return bool(result.rowcount)
+
+
+def delete_duplicate_events(db: Session) -> int:
+    """같은 이벤트(source_url+category+start_at+end_at)가 여러 행으로 남아있을 때
+    가장 최근 행(id가 가장 큰 행)만 남기고 나머지를 지운다.
+
+    소스가 바뀌어도(예: Leek Duck 영문 -> 공식 한국 뉴스 한글) upsert_event는
+    source_url 기반 external_key로 갱신하지만, 소스 자체가 바뀐 이벤트는
+    external_key도 함께 바뀌어 예전 행이 그대로 남는다. 이 함수는 그렇게 남은
+    옛 행을 정리한다.
+    """
+    newer = aliased(Event)
+    older_ids = select(Event.id).join(
+        newer,
+        and_(
+            Event.source_url == newer.source_url,
+            Event.category == newer.category,
+            Event.start_at == newer.start_at,
+            Event.end_at == newer.end_at,
+            Event.id < newer.id,
+        ),
+    )
+    result = db.execute(delete(Event).where(Event.id.in_(older_ids)))
+    db.flush()
     return int(result.rowcount or 0)
 
 

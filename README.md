@@ -37,6 +37,13 @@ Swagger `/docs`에서 `POST /api/admin/collect?days=30`을 실행하고 요청 �
 
 기존 `events` 테이블은 삭제하지 않습니다. 앱 시작 시 필요한 열과 `collect_runs` 테이블이 자동으로 추가됩니다. 새 데이터는 출처 URL, 분류, 시작 시각을 해시한 `external_key`로 upsert됩니다 (제목은 소스가 바뀌어도 같은 이벤트로 인식되도록 키에서 제외).
 
+## 이벤트 삭제
+
+세 관리자 API 모두 `POST /api/admin/collect`와 같은 방식으로 `x-admin-token` 헤더가 필요합니다.
+
+- `DELETE /api/admin/events/{event_id}`: 이벤트 하나를 id로 삭제합니다. 없는 id면 404를 반환합니다.
+- `DELETE /api/admin/events/dedupe`: 출처 URL·분류·시작/종료 시각이 같은 중복 이벤트 중 오래된 행(가장 낮은 id)만 지우고 최신 행은 남깁니다. 예전 `external_key` 산출 방식이 title을 포함하던 시절 생긴 레거시 중복(같은 이벤트가 영문/한글로 각각 저장된 경우 등)을 정리할 때 씁니다. 응답의 `removed`로 삭제된 개수를 확인합니다.
+
 ## 자동 수집
 
 웹 서비스가 실행 중이면 같은 프로세스에서 한국 시간 06:00과 18:00에 자동으로 30일 일정을 수집합니다. 별도 Railway Cron 서비스는 필요하지 않습니다. 끄려면 `AUTO_COLLECT_ENABLED=false`를 설정합니다. 서비스는 하나의 replica로 실행하는 것을 권장합니다.

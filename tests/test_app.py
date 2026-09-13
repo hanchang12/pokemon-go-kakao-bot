@@ -37,6 +37,100 @@ def test_admin_endpoint_rejects_bad_token():
     assert response.status_code == 401
 
 
+def _add_event(title, *, source_url="https://pokemongolive.com/sample", hours_from_now=1, start=None):
+    start = start or datetime.now(KST) + timedelta(hours=hours_from_now)
+    item = CollectedEvent(
+        title=title,
+        category="event",
+        start_at=start,
+        end_at=start + timedelta(hours=3),
+        source_name="Pokemon GO Live",
+        source_url=source_url,
+        confidence=1,
+    )
+    with SessionLocal() as db:
+        event, _ = upsert_event(db, item)
+        db.commit()
+        return event.id
+
+
+def test_delete_event_by_id_removes_it():
+    event_id = _add_event("삭제될 이벤트")
+
+    response = client.delete(
+        f"/api/admin/events/{event_id}", headers={"x-admin-token": "test-admin-token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted", "id": event_id}
+    with SessionLocal() as db:
+        assert db.get(main_module.Event, event_id) is None
+
+
+def test_delete_event_by_id_404_when_missing():
+    response = client.delete(
+        "/api/admin/events/999999", headers={"x-admin-token": "test-admin-token"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_event_by_id_requires_admin_token():
+    event_id = _add_event("보호될 이벤트")
+
+    response = client.delete(f"/api/admin/events/{event_id}")
+
+    assert response.status_code == 401
+    with SessionLocal() as db:
+        assert db.get(main_module.Event, event_id) is not None
+
+
+def test_dedupe_removes_older_duplicate_and_keeps_newer():
+    # upsert_event는 source_url/category/start_at이 같으면 같은 external_key를
+    # 만들어 한 행으로 합치므로, 이미 서로 다른 external_key로 저장된 옛 중복
+    # 행(예: 코드 수정 전 title 기반 키로 만들어진 레거시 행)을 직접 재현한다.
+    shared_start = datetime.now(KST) + timedelta(hours=1)
+    shared_end = shared_start + timedelta(hours=3)
+    with SessionLocal() as db:
+        old = main_module.Event(
+            external_key="legacy-key-old",
+            title="영문 제목",
+            category="event",
+            start_at=shared_start,
+            end_at=shared_end,
+            source_name="Leek Duck",
+            source_url="https://leekduck.com/events/raid/",
+            confidence=0.75,
+        )
+        new = main_module.Event(
+            external_key="legacy-key-new",
+            title="한글 제목",
+            category="event",
+            start_at=shared_start,
+            end_at=shared_end,
+            source_name="공식 한국 뉴스",
+            source_url="https://leekduck.com/events/raid/",
+            confidence=0.9,
+        )
+        db.add_all([old, new])
+        db.commit()
+        db.refresh(old)
+        db.refresh(new)
+        old_id, new_id = old.id, new.id
+    other_id = _add_event("무관한 이벤트", source_url="https://leekduck.com/events/other/")
+
+    response = client.delete(
+        "/api/admin/events/dedupe", headers={"x-admin-token": "test-admin-token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed", "removed": 1}
+    with SessionLocal() as db:
+        assert db.get(main_module.Event, old_id) is None
+        assert db.get(main_module.Event, new_id) is not None
+        assert db.get(main_module.Event, other_id) is not None
+
+
 def test_legacy_test_events_are_removed():
     start = datetime.now(KST) + timedelta(hours=1)
     with SessionLocal() as db:
