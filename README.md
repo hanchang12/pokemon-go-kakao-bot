@@ -1,6 +1,6 @@
 # Pokemon GO Kakao Bot
 
-카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. 기본 수집기인 Groq Compound의 웹 검색으로 한국 기준 30일 일정을 수집하고, 동일 이벤트는 중복 저장하지 않고 갱신합니다. 필요하면 환경 변수만 바꿔 OpenAI 수집기로 전환할 수 있습니다.
+카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. 기본 수집기인 Gemini의 Google 검색으로 한국 기준 30일 일정을 수집하고, 동일 이벤트는 중복 저장하지 않고 갱신합니다. 필요하면 환경 변수만 바꿔 Groq 또는 OpenAI 수집기로 전환할 수 있습니다.
 
 ## 지원 명령어
 
@@ -14,14 +14,14 @@
 
 기존 `DATABASE_URL`에 다음 값을 추가합니다.
 
-- `AI_PROVIDER`: 기본값 `groq`
-- `GROQ_API_KEY`: Groq Console에서 발급한 API 키
-- `GROQ_MODEL`: 기본값 `groq/compound`
+- `AI_PROVIDER`: 기본값 `gemini`
+- `GEMINI_API_KEY`: Google AI Studio에서 발급한 API 키
+- `GEMINI_MODEL`: 기본값 `gemini-2.5-flash`
 - `ADMIN_TOKEN`: 관리자 API에 사용할 충분히 긴 임의 문자열
 
 실제 값은 저장소에 커밋하지 마세요. `.env.example`은 이름과 형식만 보여주는 예시입니다.
 
-나중에 OpenAI로 전환하려면 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정합니다. Groq를 사용할 때는 `OPENAI_API_KEY`가 필요하지 않습니다.
+Groq로 전환하려면 `AI_PROVIDER=groq`, `GROQ_API_KEY`, `GROQ_MODEL`을 설정합니다. OpenAI로 전환하려면 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정합니다. 선택하지 않은 공급자의 API 키는 필요하지 않습니다.
 
 ## 배포 후 최초 수집
 
@@ -47,4 +47,4 @@ pytest -q
 uvicorn app.main:app --reload
 ```
 
-`DATABASE_URL`이 없으면 로컬 SQLite 파일을 사용합니다. 기본 설정으로 실제 일정을 수집하려면 `GROQ_API_KEY`가 필요합니다.
+`DATABASE_URL`이 없으면 로컬 SQLite 파일을 사용합니다. 기본 설정으로 실제 일정을 수집하려면 `GEMINI_API_KEY`가 필요합니다.

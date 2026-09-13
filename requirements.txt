@@ -2,4 +2,6 @@ fastapi>=0.115,<1
 uvicorn[standard]
 sqlalchemy>=2.0,<3
 psycopg2-binary
+tzdata
+google-genai>=1.0,<2
 openai>=1.68.0,<3

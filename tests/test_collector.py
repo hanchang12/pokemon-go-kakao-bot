@@ -24,6 +24,20 @@ VALID_EVENTS = {
 }
 
 
+class FakeGeminiModels:
+    def __init__(self):
+        self.calls = []
+
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            return SimpleNamespace(text="official researched event notes")
+        return SimpleNamespace(
+            text=json.dumps(VALID_EVENTS),
+            parsed=collector.CollectedEvents.model_validate(VALID_EVENTS),
+        )
+
+
 class FakeChatCompletions:
     def __init__(self, contents):
         self.contents = iter(contents)
@@ -82,13 +96,37 @@ def test_groq_collection_retries_invalid_schema(monkeypatch):
     assert "did not match" in completions.calls[1]["messages"][-1]["content"]
 
 
-def test_provider_configuration_defaults_to_groq(monkeypatch):
-    monkeypatch.delenv("AI_PROVIDER", raising=False)
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+def test_gemini_collection_searches_then_structures(monkeypatch):
+    models = FakeGeminiModels()
+    client = SimpleNamespace(models=models)
+    created_with = {}
 
-    assert collector._provider_name() == "groq"
-    with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
-        collector._require_provider_key("groq")
+    def client_factory(**kwargs):
+        created_with.update(kwargs)
+        return client
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(collector.genai, "Client", client_factory)
+
+    result = collector._collect_with_gemini("find events")
+
+    assert result.events[0].title == "테스트 이벤트"
+    assert created_with == {"api_key": "test-gemini-key"}
+    assert len(models.calls) == 2
+    search_config = models.calls[0]["config"]
+    assert search_config.tools[0].google_search is not None
+    structure_config = models.calls[1]["config"]
+    assert structure_config.response_mime_type == "application/json"
+    assert structure_config.response_schema is collector.CollectedEvents
+
+
+def test_provider_configuration_defaults_to_gemini(monkeypatch):
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    assert collector._provider_name() == "gemini"
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        collector._require_provider_key("gemini")
 
 
 def test_unknown_provider_is_rejected():

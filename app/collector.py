@@ -3,6 +3,8 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from google import genai
+from google.genai import types
 from openai import OpenAI
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -18,16 +20,69 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
 def _provider_name() -> str:
-    return os.getenv("AI_PROVIDER", "groq").strip().lower()
+    return os.getenv("AI_PROVIDER", "gemini").strip().lower()
 
 
 def _require_provider_key(provider: str) -> None:
+    if provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
+        raise RuntimeError("GEMINI_API_KEY is not configured")
     if provider == "groq" and not os.getenv("GROQ_API_KEY"):
         raise RuntimeError("GROQ_API_KEY is not configured")
     if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not configured")
-    if provider not in {"groq", "openai"}:
-        raise RuntimeError("AI_PROVIDER must be either 'groq' or 'openai'")
+    if provider not in {"gemini", "groq", "openai"}:
+        raise RuntimeError("AI_PROVIDER must be 'gemini', 'groq', or 'openai'")
+
+
+def _collect_with_gemini(prompt: str) -> CollectedEvents:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    research_prompt = f"""
+{prompt}
+
+Use Google Search. Research only pages on pokemongolive.com and leekduck.com.
+Include the exact title, start and end times, bonuses, featured Pokemon, source
+name, and source URL for every confirmed event you find. Preserve all relevant
+facts and URLs in your research notes so another model call can structure them.
+""".strip()
+    research = client.models.generate_content(
+        model=model,
+        contents=research_prompt,
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.2,
+        ),
+    )
+    if not research.text:
+        raise RuntimeError("Gemini returned no web research")
+
+    structure_prompt = f"""
+Convert the research notes below into the requested event schema.
+
+Use only facts and source URLs present in the notes. Do not invent missing
+dates, times, bonuses, Pokemon, or URLs. Return an empty events array when the
+notes contain no confirmed matching events. All timestamps must include an
+explicit UTC offset and be converted to Asia/Seoul.
+
+Research notes:
+{research.text}
+""".strip()
+    structured = client.models.generate_content(
+        model=model,
+        contents=structure_prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=CollectedEvents,
+            temperature=0.1,
+        ),
+    )
+    if isinstance(structured.parsed, CollectedEvents):
+        return structured.parsed
+    if structured.parsed is not None:
+        return CollectedEvents.model_validate(structured.parsed)
+    if not structured.text:
+        raise RuntimeError("Gemini returned no structured event data")
+    return CollectedEvents.model_validate_json(structured.text)
 
 
 def _collect_with_groq(prompt: str) -> CollectedEvents:
@@ -115,6 +170,8 @@ def _collect_with_openai(prompt: str) -> CollectedEvents:
 
 
 def _collect_from_provider(provider: str, prompt: str) -> CollectedEvents:
+    if provider == "gemini":
+        return _collect_with_gemini(prompt)
     if provider == "groq":
         return _collect_with_groq(prompt)
     return _collect_with_openai(prompt)
