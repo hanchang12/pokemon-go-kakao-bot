@@ -9,8 +9,11 @@ from app.schemas import CollectedEvent
 
 
 def make_external_key(event: CollectedEvent) -> str:
+    # source_url instead of title: the same event's title can be re-worded between
+    # collector runs (e.g. Leek Duck English -> official Korean), and keying on title
+    # would then treat it as a new event instead of updating the existing one.
     normalized = "|".join(
-        [event.title.strip().casefold(), event.category, event.start_at.isoformat()]
+        [str(event.source_url).strip().casefold(), event.category, event.start_at.isoformat()]
     )
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
