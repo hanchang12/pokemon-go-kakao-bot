@@ -5,7 +5,7 @@
 그대로 적혀 있고, 한국 한정 이벤트도 이곳에만 실린다.
 
 다만 레이드아워·스포트라이트아워 같은 주간 반복 일정은 공식 한국 사이트에
-게시되지 않으므로 ``source_fetcher``(Leek Duck)가 그 부분을 보완한다.
+게시되지 않으므로 ``community_source``(포케토리, 포고지지)가 그 부분을 보완한다.
 """
 
 from dataclasses import dataclass

@@ -75,7 +75,12 @@ def test_groq_collection_uses_web_search_and_validates_json(monkeypatch):
     assert request["model"] == "groq/compound"
     assert request["response_format"] == {"type": "json_object"}
     assert request["extra_body"]["search_settings"] == {
-        "include_domains": ["pokemongo.com", "pokemongolive.com", "leekduck.com"],
+        "include_domains": [
+            "pokemongo.com",
+            "pokemongolive.com",
+            "poketory.com",
+            "pgsharp-info.com",
+        ],
         "country": "south korea",
     }
 
