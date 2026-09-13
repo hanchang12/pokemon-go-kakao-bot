@@ -60,7 +60,7 @@ Swagger `/docs`에서 `POST /api/admin/collect?days=30`을 실행하고 요청 �
 
 ## 자동 수집
 
-웹 서비스가 실행 중이면 같은 프로세스에서 한국 시간 06:00과 18:00에 자동으로 30일 일정을 수집합니다. 별도 Railway Cron 서비스는 필요하지 않습니다. 끄려면 `AUTO_COLLECT_ENABLED=false`를 설정합니다. 서비스는 하나의 replica로 실행하는 것을 권장합니다.
+웹 서비스가 실행 중이면 같은 프로세스에서 한국 시간 06:00, 12:00, 18:00에 자동으로 30일 일정을 수집합니다. 별도 Railway Cron 서비스는 필요하지 않습니다. 끄려면 `AUTO_COLLECT_ENABLED=false`를 설정합니다. 서비스는 하나의 replica로 실행하는 것을 권장합니다.
 
 앱 시작 시 예전에 생성된 `source_name=TEST` 테스트 일정은 자동으로 정리되며, 테스트 일정 생성용 관리자 API는 제공하지 않습니다.
 

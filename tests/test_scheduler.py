@@ -12,8 +12,13 @@ def test_next_collection_is_same_day_at_6am():
     assert next_collection_at(now) == datetime(2026, 9, 13, 6, 0, tzinfo=KST)
 
 
-def test_next_collection_is_same_day_at_6pm():
+def test_next_collection_is_same_day_at_noon():
     now = datetime(2026, 9, 13, 6, 0, tzinfo=KST)
+    assert next_collection_at(now) == datetime(2026, 9, 13, 12, 0, tzinfo=KST)
+
+
+def test_next_collection_is_same_day_at_6pm():
+    now = datetime(2026, 9, 13, 12, 0, tzinfo=KST)
     assert next_collection_at(now) == datetime(2026, 9, 13, 18, 0, tzinfo=KST)
 
 

@@ -10,7 +10,7 @@ from app.db import SessionLocal
 
 KST = ZoneInfo("Asia/Seoul")
 LOGGER = logging.getLogger(__name__)
-COLLECTION_HOURS = (6, 18)
+COLLECTION_HOURS = (6, 12, 18)
 
 
 def auto_collect_enabled() -> bool:
