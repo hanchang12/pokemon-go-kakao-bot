@@ -1,6 +1,6 @@
 # Pokemon GO Kakao Bot
 
-카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. 기본 수집기인 Gemini의 Google 검색으로 한국 기준 30일 일정을 수집하고, 동일 이벤트는 중복 저장하지 않고 갱신합니다. 필요하면 환경 변수만 바꿔 Groq 또는 OpenAI 수집기로 전환할 수 있습니다.
+카카오톡 메신저봇 API2, Railway FastAPI, PostgreSQL을 연결해 Pokemon GO 일정을 답하는 봇입니다. 기본 수집기는 공개 일정 페이지를 직접 읽고 무료 Gemini 모델로 한국 기준 30일 일정을 정규화합니다. 동일 이벤트는 중복 저장하지 않고 갱신하며, 필요하면 환경 변수만 바꿔 Groq 또는 OpenAI 수집기로 전환할 수 있습니다.
 
 ## 지원 명령어
 
@@ -16,7 +16,7 @@
 
 - `AI_PROVIDER`: 기본값 `gemini`
 - `GEMINI_API_KEY`: Google AI Studio에서 발급한 API 키
-- `GEMINI_MODEL`: 기본값 `gemini-2.5-flash`
+- `GEMINI_MODEL`: 기본값 `gemini-3.6-flash`
 - `ADMIN_TOKEN`: 관리자 API에 사용할 충분히 긴 임의 문자열
 
 실제 값은 저장소에 커밋하지 마세요. `.env.example`은 이름과 형식만 보여주는 예시입니다.

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.event_service import upsert_event
 from app.models import CollectRun, utc_now
 from app.schemas import CollectedEvents
+from app.source_fetcher import fetch_event_candidates
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -34,41 +35,31 @@ def _require_provider_key(provider: str) -> None:
         raise RuntimeError("AI_PROVIDER must be 'gemini', 'groq', or 'openai'")
 
 
-def _collect_with_gemini(prompt: str) -> CollectedEvents:
+def _gemini_model() -> str:
+    configured = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    if configured in {"gemini-2.5-flash", "models/gemini-2.5-flash"}:
+        return "gemini-3.6-flash"
+    return configured
+
+
+def _collect_with_gemini(prompt: str, source_text: str) -> CollectedEvents:
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    research_prompt = f"""
+    structure_prompt = f"""
 {prompt}
 
-Use Google Search. Research only pages on pokemongolive.com and leekduck.com.
-Include the exact title, start and end times, bonuses, featured Pokemon, source
-name, and source URL for every confirmed event you find. Preserve all relevant
-facts and URLs in your research notes so another model call can structure them.
-""".strip()
-    research = client.models.generate_content(
-        model=model,
-        contents=research_prompt,
-        config=types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0.2,
-        ),
-    )
-    if not research.text:
-        raise RuntimeError("Gemini returned no web research")
+Convert the public schedule records below into the requested event schema.
 
-    structure_prompt = f"""
-Convert the research notes below into the requested event schema.
-
-Use only facts and source URLs present in the notes. Do not invent missing
+Use only facts and source URLs present in the records. Do not invent missing
 dates, times, bonuses, Pokemon, or URLs. Return an empty events array when the
-notes contain no confirmed matching events. All timestamps must include an
-explicit UTC offset and be converted to Asia/Seoul.
+records contain no confirmed matching events. Preserve the supplied timestamps
+and URLs exactly. Map each source type to the closest category in the schema.
+Use confidence 0.75 because Leek Duck is a secondary source.
 
-Research notes:
-{research.text}
+Public schedule records:
+{source_text}
 """.strip()
     structured = client.models.generate_content(
-        model=model,
+        model=_gemini_model(),
         contents=structure_prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -171,7 +162,9 @@ def _collect_with_openai(prompt: str) -> CollectedEvents:
 
 def _collect_from_provider(provider: str, prompt: str) -> CollectedEvents:
     if provider == "gemini":
-        return _collect_with_gemini(prompt)
+        now = datetime.now(KST)
+        until = now + timedelta(days=60)
+        return _collect_with_gemini(prompt, fetch_event_candidates(now, until))
     if provider == "groq":
         return _collect_with_groq(prompt)
     return _collect_with_openai(prompt)

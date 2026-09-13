@@ -30,8 +30,6 @@ class FakeGeminiModels:
 
     def generate_content(self, **kwargs):
         self.calls.append(kwargs)
-        if len(self.calls) == 1:
-            return SimpleNamespace(text="official researched event notes")
         return SimpleNamespace(
             text=json.dumps(VALID_EVENTS),
             parsed=collector.CollectedEvents.model_validate(VALID_EVENTS),
@@ -108,16 +106,21 @@ def test_gemini_collection_searches_then_structures(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setattr(collector.genai, "Client", client_factory)
 
-    result = collector._collect_with_gemini("find events")
+    result = collector._collect_with_gemini("find events", "public source records")
 
     assert result.events[0].title == "테스트 이벤트"
     assert created_with == {"api_key": "test-gemini-key"}
-    assert len(models.calls) == 2
-    search_config = models.calls[0]["config"]
-    assert search_config.tools[0].google_search is not None
-    structure_config = models.calls[1]["config"]
+    assert len(models.calls) == 1
+    assert models.calls[0]["model"] == "gemini-3.6-flash"
+    structure_config = models.calls[0]["config"]
     assert structure_config.response_mime_type == "application/json"
     assert structure_config.response_schema is collector.CollectedEvents
+
+
+def test_deprecated_gemini_model_is_upgraded(monkeypatch):
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    assert collector._gemini_model() == "gemini-3.6-flash"
 
 
 def test_provider_configuration_defaults_to_gemini(monkeypatch):

@@ -3,5 +3,6 @@ uvicorn[standard]
 sqlalchemy>=2.0,<3
 psycopg2-binary
 tzdata
+httpx>=0.27,<1
 google-genai>=1.0,<2
 openai>=1.68.0,<3
