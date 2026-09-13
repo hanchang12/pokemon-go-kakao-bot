@@ -34,6 +34,20 @@ def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="invalid admin token")
 
 
+def safe_error_detail(exc: Exception) -> str:
+    message = str(exc)
+    for name in (
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENAI_API_KEY",
+        "ADMIN_TOKEN",
+    ):
+        secret = os.getenv(name)
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    return f"{type(exc).__name__}: {message}"[:1000]
+
+
 def day_window(offset: int = 0) -> tuple[datetime, datetime]:
     target = datetime.now(KST).date() + timedelta(days=offset)
     start = datetime.combine(target, time.min, tzinfo=KST)
@@ -105,6 +119,11 @@ def run_collection(days: int = 30, db: Session = Depends(get_db)):
         run = collect_events(db, days=days)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"collection provider failed: {safe_error_detail(exc)}",
+        ) from exc
     return {
         "status": run.status,
         "run_id": run.id,
