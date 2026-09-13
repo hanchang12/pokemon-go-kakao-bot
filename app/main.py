@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -22,6 +23,14 @@ from app.event_service import (
 from app.models import Event
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
+from app.subscription_service import (
+    cancel_subscription,
+    due_subscriptions,
+    get_subscription,
+    mark_fired,
+    parse_time_of_day,
+    upsert_subscription,
+)
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -38,12 +47,19 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · 포고봇 스포트라이트 — 매주 목 18:00
 · 포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
 
+⏰ 예약
+· 포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
+· 포고봇 예약 매일 09:00 — 매일 09:00에 정기 발송
+· 포고봇 예약확인 — 이 방의 예약 상태 확인
+· 포고봇 예약취소 — 이 방의 예약 취소
+
 ℹ️ 기타
 · 포고봇 리스트 / 도움말 — 이 안내
 · 포고봇 테스트 — 서버 연결 확인
 
 일정은 공식 한국 사이트(pokemongo.com/ko) 기준입니다.
 해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다."""
+RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -156,6 +172,12 @@ def event_reply(title: str, events: list[Event], empty: str) -> str:
     return "\n\n".join(sections)
 
 
+def today_digest(db: Session) -> str:
+    start, end = day_window()
+    events = events_between(db, start, end)
+    return event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")
+
+
 @app.get("/")
 def root():
     return {"name": "Pokemon GO Kakao Bot", "status": "running", "version": app.version}
@@ -230,6 +252,22 @@ def events_today(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/subscriptions/due")
+def subscriptions_due(db: Session = Depends(get_db)):
+    """메신저봇R 스크립트가 주기적으로 폴링해서 예약 발송을 가져가는 엔드포인트.
+
+    서버는 카카오톡 방에 직접 메시지를 보낼 수 없어서(메신저봇R만 가능), 발송할
+    내용을 여기 큐에 담아두면 스크립트가 폴링 후 각 방에 직접 전송한다.
+    """
+    now = datetime.now(KST)
+    items = []
+    for subscription in due_subscriptions(db, now):
+        items.append({"room": subscription.room, "message": today_digest(db)})
+        mark_fired(db, subscription, now)
+    db.commit()
+    return {"count": len(items), "items": items}
+
+
 @app.post("/api/messages")
 def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
     msg = " ".join(data.message.strip().split())
@@ -251,6 +289,46 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         event = next_event(db, now)
         return {"reply": format_event(event) if event else "예정된 Pokemon GO 일정이 없습니다."}
 
+    if "포고봇 예약취소" in msg:
+        cancelled = cancel_subscription(db, data.room)
+        db.commit()
+        return {"reply": "🗑️ 이 방의 예약을 취소했습니다." if cancelled else "등록된 예약이 없습니다."}
+
+    if "포고봇 예약확인" in msg:
+        subscription = get_subscription(db, data.room)
+        if subscription is None:
+            return {"reply": "등록된 예약이 없습니다."}
+        kind = "매일" if subscription.recurring else "1회"
+        next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
+        return {
+            "reply": f"⏰ {kind} {subscription.send_time} 예약 중\n다음 발송: {next_at}"
+        }
+
+    if "포고봇 예약" in msg:
+        match = RESERVE_PATTERN.search(msg)
+        if not match:
+            return {
+                "reply": (
+                    "⏰ 예약 시간 형식이 올바르지 않습니다.\n"
+                    "포고봇 예약 09:00 (1회)\n"
+                    "포고봇 예약 매일 09:00 (정기)"
+                )
+            }
+        send_time = parse_time_of_day(match.group(2))
+        if send_time is None:
+            return {"reply": "⏰ 예약 시간은 00:00~23:59 사이로 입력해 주세요."}
+        recurring = match.group(1) is not None
+        subscription = upsert_subscription(db, data.room, send_time, recurring, now)
+        db.commit()
+        kind = "매일" if recurring else "1회"
+        next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
+        return {
+            "reply": (
+                f"✅ {kind} {subscription.send_time}에 '포고봇 오늘' 목록을 보내드릴게요.\n"
+                f"다음 발송: {next_at}"
+            )
+        }
+
     filters = [
         ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),
         ("스포트라이트", {"spotlight_hour"}, "🔦 앞으로 7일간 스포트라이트 아워"),
@@ -269,9 +347,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             }
 
     if "포고봇 오늘" in msg:
-        start, end = day_window()
-        events = events_between(db, start, end)
-        return {"reply": event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")}
+        return {"reply": today_digest(db)}
     if "포고봇 내일" in msg:
         start, end = day_window(1)
         events = events_between(db, start, end)

@@ -31,6 +31,17 @@ class Event(Base):
     last_checked_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    room = Column(String(200), nullable=False, unique=True)
+    recurring = Column(Boolean, nullable=False, default=False)
+    send_time = Column(String(5), nullable=False)  # "HH:MM", Asia/Seoul wall-clock
+    next_fire_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class CollectRun(Base):
     __tablename__ = "collect_runs"
 
