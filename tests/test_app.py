@@ -131,6 +131,33 @@ def test_dedupe_removes_older_duplicate_and_keeps_newer():
         assert db.get(main_module.Event, other_id) is not None
 
 
+def test_delete_events_by_source_removes_only_matching_domain():
+    leekduck_id = _add_event("리크덕 이벤트", source_url="https://leekduck.com/events/raid/")
+    other_id = _add_event("다른 이벤트", source_url="https://pokemongo.com/ko/news/sample")
+
+    response = client.delete(
+        "/api/admin/events/source",
+        params={"domain": "leekduck.com"},
+        headers={"x-admin-token": "test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed", "removed": 1}
+    with SessionLocal() as db:
+        assert db.get(main_module.Event, leekduck_id) is None
+        assert db.get(main_module.Event, other_id) is not None
+
+
+def test_delete_events_by_source_requires_admin_token():
+    event_id = _add_event("리크덕 이벤트", source_url="https://leekduck.com/events/raid/")
+
+    response = client.delete("/api/admin/events/source", params={"domain": "leekduck.com"})
+
+    assert response.status_code == 401
+    with SessionLocal() as db:
+        assert db.get(main_module.Event, event_id) is not None
+
+
 def test_legacy_test_events_are_removed():
     start = datetime.now(KST) + timedelta(hours=1)
     with SessionLocal() as db:

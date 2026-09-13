@@ -57,6 +57,7 @@ Swagger `/docs`에서 `POST /api/admin/collect?days=30`을 실행하고 요청 �
 
 - `DELETE /api/admin/events/{event_id}`: 이벤트 하나를 id로 삭제합니다. 없는 id면 404를 반환합니다.
 - `DELETE /api/admin/events/dedupe`: 출처 URL·분류·시작/종료 시각이 같은 중복 이벤트 중 오래된 행(가장 낮은 id)만 지우고 최신 행은 남깁니다. 예전 `external_key` 산출 방식이 title을 포함하던 시절 생긴 레거시 중복(같은 이벤트가 영문/한글로 각각 저장된 경우 등)을 정리할 때 씁니다. 응답의 `removed`로 삭제된 개수를 확인합니다.
+- `DELETE /api/admin/events/source?domain=leekduck.com`: 출처 URL에 해당 도메인이 포함된 이벤트를 전부 지웁니다. 더 이상 쓰지 않는 소스(예: leekduck.com)에서 예전에 수집돼 남아있는 행을 정리할 때 씁니다.
 
 ## 자동 수집
 

@@ -54,6 +54,13 @@ def delete_duplicate_events(db: Session) -> int:
     return int(result.rowcount or 0)
 
 
+def delete_events_by_source_domain(db: Session, domain: str) -> int:
+    """출처 URL에 domain이 포함된 이벤트를 전부 지운다 (예: 더 이상 안 쓰는 소스 정리)."""
+    result = db.execute(delete(Event).where(Event.source_url.contains(domain)))
+    db.flush()
+    return int(result.rowcount or 0)
+
+
 def upsert_event(db: Session, item: CollectedEvent) -> tuple[Event, bool]:
     key = make_external_key(item)
     event = db.scalar(select(Event).where(Event.external_key == key))

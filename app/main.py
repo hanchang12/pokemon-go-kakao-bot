@@ -18,6 +18,7 @@ from app.event_service import (
     current_events,
     delete_duplicate_events,
     delete_event,
+    delete_events_by_source_domain,
     events_between,
     next_event,
     remove_test_events,
@@ -250,6 +251,14 @@ def run_collection(days: int = 30, db: Session = Depends(get_db)):
 @app.delete("/api/admin/events/dedupe", dependencies=[Depends(require_admin)])
 def dedupe_events(db: Session = Depends(get_db)):
     removed = delete_duplicate_events(db)
+    db.commit()
+    return {"status": "completed", "removed": removed}
+
+
+@app.delete("/api/admin/events/source", dependencies=[Depends(require_admin)])
+def delete_events_by_source(domain: str, db: Session = Depends(get_db)):
+    """더 이상 쓰지 않는 소스(예: leekduck.com)에서 온 이벤트를 전부 지운다."""
+    removed = delete_events_by_source_domain(db, domain)
     db.commit()
     return {"status": "completed", "removed": removed}
 
