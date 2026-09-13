@@ -173,6 +173,57 @@ def test_category_command_and_next_event():
     assert "테스트 커뮤니티 데이" in upcoming.json()["reply"]
 
 
+class _SyncThread:
+    """threading.Thread를 대신해 target을 즉시 동기 실행하는 테스트용 더블."""
+
+    def __init__(self, target=None, args=(), daemon=None):
+        self.target = target
+        self.args = args
+
+    def start(self):
+        self.target(*self.args)
+
+
+def test_collect_command_runs_in_background_and_reports_success(monkeypatch):
+    class FakeRun:
+        status = "completed"
+        found_count = 3
+        inserted_count = 1
+        updated_count = 2
+
+    monkeypatch.setattr(main_module, "collect_events", lambda db, days=30: FakeRun())
+    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
+
+    response = message("포고봇 수집")
+
+    assert "수집을 시작" in response.json()["reply"]
+    due_items = client.get("/api/subscriptions/due").json()["items"]
+    assert any("수집 완료" in item["message"] for item in due_items)
+
+
+def test_collect_command_reports_failure(monkeypatch):
+    def fake_collect(db, days=30):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main_module, "collect_events", fake_collect)
+    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
+
+    message("포고봇 수집")
+
+    due_items = client.get("/api/subscriptions/due").json()["items"]
+    assert any("수집 실패" in item["message"] for item in due_items)
+
+
+def test_collect_command_rejects_when_already_running():
+    with SessionLocal() as db:
+        db.add(main_module.CollectRun(status="running"))
+        db.commit()
+
+    response = message("포고봇 수집")
+
+    assert "이미 수집이 진행" in response.json()["reply"]
+
+
 def test_help_and_unknown_message():
     assert "레이드아워" in message("포고봇 도움말").json()["reply"]
     assert message("안녕하세요").json() == {"reply": None}

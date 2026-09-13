@@ -42,6 +42,17 @@ class Subscription(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class Outbox(Base):
+    """폰의 메신저봇R 스크립트가 폴링해서 방에 직접 전달할 1회성 메시지 큐."""
+
+    __tablename__ = "outbox"
+
+    id = Column(Integer, primary_key=True)
+    room = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class CollectRun(Base):
     __tablename__ = "collect_runs"
 

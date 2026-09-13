@@ -3,11 +3,13 @@ import hmac
 import logging
 import os
 import re
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.collector import collect_events
@@ -20,7 +22,8 @@ from app.event_service import (
     next_event,
     remove_test_events,
 )
-from app.models import Event
+from app.models import CollectRun, Event
+from app.outbox_service import enqueue_message, pop_outbox
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
 from app.subscription_service import (
@@ -54,6 +57,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · 포고봇 예약취소 — 이 방의 예약 취소
 
 ℹ️ 기타
+· 포고봇 수집 — 최신 이벤트 지금 수집 (완료되면 알려드려요)
 · 포고봇 리스트 / 도움말 — 이 안내
 · 포고봇 테스트 — 서버 연결 확인
 
@@ -178,6 +182,32 @@ def today_digest(db: Session) -> str:
     return event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")
 
 
+def _collection_in_progress(db: Session) -> bool:
+    latest = db.scalar(select(CollectRun).order_by(CollectRun.started_at.desc()).limit(1))
+    return latest is not None and latest.status == "running"
+
+
+def _run_collection_and_notify(room: str) -> None:
+    """백그라운드 스레드에서 수집을 돌리고, 끝나면 outbox에 결과를 남긴다.
+
+    카카오톡 요청-응답 왕복(메신저봇R의 12초 타임아웃)보다 수집이 오래 걸릴 수
+    있어서, 명령을 받으면 즉시 응답하고 실제 수집은 별도 스레드에서 진행한다.
+    완료 결과는 /api/subscriptions/due 폴링으로 같은 방에 전달된다.
+    """
+    with SessionLocal() as db:
+        try:
+            run = collect_events(db, days=30)
+            message = (
+                "✅ 이벤트 수집 완료\n"
+                f"발견 {run.found_count} · 신규 {run.inserted_count} · 갱신 {run.updated_count}"
+            )
+        except Exception as exc:
+            LOGGER.exception("수동 수집 실패")
+            message = f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
+        enqueue_message(db, room, message)
+        db.commit()
+
+
 @app.get("/")
 def root():
     return {"name": "Pokemon GO Kakao Bot", "status": "running", "version": app.version}
@@ -264,6 +294,8 @@ def subscriptions_due(db: Session = Depends(get_db)):
     for subscription in due_subscriptions(db, now):
         items.append({"room": subscription.room, "message": today_digest(db)})
         mark_fired(db, subscription, now)
+    for pending in pop_outbox(db):
+        items.append({"room": pending.room, "message": pending.message})
     db.commit()
     return {"count": len(items), "items": items}
 
@@ -288,6 +320,14 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
     if "포고봇 다음" in msg:
         event = next_event(db, now)
         return {"reply": format_event(event) if event else "예정된 Pokemon GO 일정이 없습니다."}
+
+    if "포고봇 수집" in msg:
+        if _collection_in_progress(db):
+            return {"reply": "⏳ 이미 수집이 진행 중이에요. 완료되면 알려드릴게요."}
+        threading.Thread(
+            target=_run_collection_and_notify, args=(data.room,), daemon=True
+        ).start()
+        return {"reply": "🔄 이벤트 수집을 시작했어요. 완료되면 알려드릴게요 (몇십 초~몇 분 정도 걸려요)."}
 
     if "포고봇 예약취소" in msg:
         cancelled = cancel_subscription(db, data.room)
