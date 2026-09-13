@@ -87,7 +87,7 @@ function pollDueSubscriptions() {
     const data = JSON.parse(res.body());
     const bot = BotManager.getCurrentBot();
     for (var i = 0; i < data.items.length; i++) {
-      const item = data.items[i];
+      var item = data.items[i];
       bot.send(item.room, item.message);
     }
   } catch (e) {
@@ -95,9 +95,16 @@ function pollDueSubscriptions() {
   }
 }
 
-setInterval(pollDueSubscriptions, POLL_INTERVAL_MS);
-
-/* 메신저봇R 편집기에서 버튼으로 직접 실행해 볼 때 사용 */
+/* 메신저봇R 편집기에서 버튼으로 직접 실행해 볼 때 사용 / 컴파일 시 1회 호출됨 */
 function onStartCompile() {
   Log.i("pogo-bot 컴파일 완료 / 서버: " + SERVER_URL);
+
+  // setInterval을 스크립트 최상위(함수 밖)에 두면 일부 메신저봇R 버전에서
+  // 컴파일 자체가 실패해 response()를 포함한 모든 명령이 먹통이 될 수 있어,
+  // 반드시 이 콜백 안에서만 등록한다. 실패해도 나머지 기능엔 영향 없도록 감싼다.
+  try {
+    setInterval(pollDueSubscriptions, POLL_INTERVAL_MS);
+  } catch (e) {
+    Log.e("예약 폴링 타이머 등록 실패: " + e);
+  }
 }
