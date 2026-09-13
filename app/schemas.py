@@ -19,8 +19,10 @@ EventCategory = Literal[
 
 
 class MessageRequest(BaseModel):
-    room: str
-    sender: str
+    # 메신저봇R 앱의 내장 "디버깅 모드"/연결 테스트는 room·sender 없이 message만
+    # 보내기도 한다. 그 요청도 422로 튕기지 않도록 기본값을 둔다.
+    room: str = "unknown"
+    sender: str = "unknown"
     message: str
 
 
