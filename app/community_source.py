@@ -20,7 +20,7 @@ from app.korean_source import ArticleTextParser
 POKETORY_WEEKLY_URL = "https://poketory.com/pokemongo-weekly-event/"
 PGSHARP_NEWS_URL = "https://www.pgsharp-info.com/bbs/board.php?bo_table=news&sca=%EC%9D%BC%EC%A0%95"
 PGSHARP_ARTICLE_URL = "https://www.pgsharp-info.com/bbs/board.php?bo_table=news&wr_id={wr_id}"
-PGSHARP_ARTICLE_PATTERN = re.compile(r"bo_table=news&wr_id=(\d+)")
+PGSHARP_ARTICLE_PATTERN = re.compile(r"bo_table=news(?:&amp;|&)wr_id=(\d+)")
 USER_AGENT = "pokemon-go-kakao-bot/1.0"
 
 MAX_CHARS = 4000

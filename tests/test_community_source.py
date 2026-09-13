@@ -19,9 +19,9 @@ POKETORY_HTML = """
 
 PGSHARP_LISTING_HTML = """
 <html><body>
-  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&wr_id=1099&sca=%EC%9D%BC%EC%A0%95">달력</a>
-  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&wr_id=1080&sca=%EC%9D%BC%EC%A0%95">달력2</a>
-  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&wr_id=1099&sca=%EC%9D%BC%EC%A0%95">중복</a>
+  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&amp;wr_id=1099&amp;sca=%EC%9D%BC%EC%A0%95">달력</a>
+  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&amp;wr_id=1080&amp;sca=%EC%9D%BC%EC%A0%95">달력2</a>
+  <a href="https://www.pgsharp-info.com/bbs/board.php?bo_table=news&amp;wr_id=1099&amp;sca=%EC%9D%BC%EC%A0%95">중복</a>
 </body></html>
 """
 
