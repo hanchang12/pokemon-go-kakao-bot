@@ -1,228 +1,123 @@
+import hmac
 import os
-from datetime import datetime, timedelta, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Text,
-    select,
-)
-from sqlalchemy.orm import declarative_base, sessionmaker
+from fastapi import Depends, FastAPI, Header, HTTPException
+from sqlalchemy.orm import Session
 
+from app.collector import collect_events
+from app.db import SessionLocal, ensure_schema
+from app.event_service import current_events, events_between, next_event, upsert_event
+from app.models import Event
+from app.schemas import CollectedEvent, MessageRequest
 
-# --------------------------------------------------
-# 기본 설정
-# --------------------------------------------------
-
-app = FastAPI(
-    title="Pokemon GO Kakao Bot",
-    version="0.4.0",
-)
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 KST = ZoneInfo("Asia/Seoul")
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-)
-
-SessionLocal = sessionmaker(
-    bind=engine,
-    autocommit=False,
-    autoflush=False,
-)
-
-Base = declarative_base()
+app = FastAPI(title="Pokemon GO Kakao Bot", version="1.0.0")
+ensure_schema()
 
 
-# --------------------------------------------------
-# DB Model
-# --------------------------------------------------
-
-class Event(Base):
-    __tablename__ = "events"
-
-    id = Column(Integer, primary_key=True)
-
-    title = Column(String(200), nullable=False)
-
-    category = Column(
-        String(50),
-        nullable=False,
-        default="event",
-    )
-
-    start_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-
-    end_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-
-    description = Column(Text)
-
-    source_name = Column(String(100))
-    source_url = Column(Text)
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-Base.metadata.create_all(bind=engine)
+def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+    expected = os.getenv("ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="ADMIN_TOKEN is not configured")
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
+        raise HTTPException(status_code=401, detail="invalid admin token")
 
 
-# --------------------------------------------------
-# Request Model
-# --------------------------------------------------
+def day_window(offset: int = 0) -> tuple[datetime, datetime]:
+    target = datetime.now(KST).date() + timedelta(days=offset)
+    start = datetime.combine(target, time.min, tzinfo=KST)
+    return start, start + timedelta(days=1)
 
-class MessageRequest(BaseModel):
-    room: str
-    sender: str
-    message: str
-
-
-# --------------------------------------------------
-# 공통 함수
-# --------------------------------------------------
 
 def format_event(event: Event) -> str:
-
     start = event.start_at.astimezone(KST)
     end = event.end_at.astimezone(KST)
-
-    return (
-        f"🎮 {event.title}\n"
-        f"⏰ {start.strftime('%m/%d %H:%M')}"
-        f" ~ {end.strftime('%H:%M')}"
-    )
-
-
-def get_events_between(start_dt, end_dt):
-
-    with SessionLocal() as db:
-
-        stmt = (
-            select(Event)
-            .where(Event.end_at >= start_dt)
-            .where(Event.start_at < end_dt)
-            .order_by(Event.start_at)
-        )
-
-        return db.scalars(stmt).all()
+    lines = [
+        f"🎮 {event.title}",
+        f"⏰ {start.strftime('%m/%d %H:%M')} ~ {end.strftime('%m/%d %H:%M')}",
+    ]
+    if event.pokemon:
+        lines.append("✨ " + ", ".join(event.pokemon[:8]))
+    if event.bonuses:
+        lines.append("🎁 " + " / ".join(event.bonuses[:3]))
+    if event.source_name:
+        lines.append(f"🔗 {event.source_name}")
+    return "\n".join(lines)
 
 
-# --------------------------------------------------
-# 기본 API
-# --------------------------------------------------
+def event_reply(title: str, events: list[Event], empty: str) -> str:
+    if not events:
+        return empty
+    return title + "\n\n" + "\n\n".join(format_event(event) for event in events)
+
 
 @app.get("/")
 def root():
-
-    return {
-        "name": "Pokemon GO Kakao Bot",
-        "status": "running",
-    }
+    return {"name": "Pokemon GO Kakao Bot", "status": "running", "version": "1.0.0"}
 
 
 @app.get("/health")
 def health():
-
-    return {
-        "status": "ok",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/db-check")
-def db_check():
-
+def db_check(db: Session = Depends(get_db)):
     try:
-
-        with engine.connect() as conn:
-            conn.exec_driver_sql("SELECT 1")
-
-        return {
-            "status": "ok",
-            "database": "connected",
-        }
-
-    except Exception as e:
-
-        return {
-            "status": "error",
-            "message": str(e),
-        }
+        db.connection().exec_driver_sql("SELECT 1")
+        return {"status": "ok", "database": "connected"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-# --------------------------------------------------
-# 테스트 이벤트 생성
-# --------------------------------------------------
-
-@app.post("/api/admin/seed-test")
-def seed_test():
-
-    now = datetime.now(KST)
-
-    start = datetime.combine(
-        now.date(),
-        time(18, 0),
-        tzinfo=KST,
+@app.post("/api/admin/seed-test", dependencies=[Depends(require_admin)])
+def seed_test(db: Session = Depends(get_db)):
+    start, _ = day_window()
+    item = CollectedEvent(
+        title="테스트 레이드아워",
+        category="raid_hour",
+        start_at=start + timedelta(hours=18),
+        end_at=start + timedelta(hours=19),
+        description="Pokemon GO 봇 테스트용 이벤트",
+        source_name="TEST",
+        source_url="https://pokemongolive.com/",
+        confidence=1.0,
     )
+    event, created = upsert_event(db, item)
+    db.commit()
+    return {"status": "ok", "event_id": event.id, "created": created, "title": event.title}
 
-    end = datetime.combine(
-        now.date(),
-        time(19, 0),
-        tzinfo=KST,
-    )
 
-    with SessionLocal() as db:
-
-        event = Event(
-            title="테스트 레이드아워",
-            category="raid_hour",
-            start_at=start,
-            end_at=end,
-            description="Pokémon GO 봇 테스트용 이벤트",
-            source_name="TEST",
-        )
-
-        db.add(event)
-        db.commit()
-        db.refresh(event)
-
+@app.post("/api/admin/collect", dependencies=[Depends(require_admin)])
+def run_collection(days: int = 30, db: Session = Depends(get_db)):
+    try:
+        run = collect_events(db, days=days)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "status": "ok",
-        "event_id": event.id,
-        "title": event.title,
+        "status": run.status,
+        "run_id": run.id,
+        "found": run.found_count,
+        "inserted": run.inserted_count,
+        "updated": run.updated_count,
     }
 
 
-# --------------------------------------------------
-# 이벤트 조회
-# --------------------------------------------------
-
 @app.get("/api/events/today")
-def events_today():
-
-    now = datetime.now(KST)
-
-    start = datetime.combine(
-        now.date(),
-        time.min,
-        tzinfo=KST,
-    )
-
-    end = start + timedelta(days=1)
-
-    events = get_events_between(start, end)
-
+def events_today(db: Session = Depends(get_db)):
+    start, end = day_window()
+    events = events_between(db, start, end)
     return {
         "count": len(events),
         "events": [
@@ -232,139 +127,70 @@ def events_today():
                 "category": event.category,
                 "start_at": event.start_at,
                 "end_at": event.end_at,
+                "source_url": event.source_url,
             }
             for event in events
         ],
     }
 
 
-# --------------------------------------------------
-# Kakao / MessengerBot API
-# --------------------------------------------------
-
 @app.post("/api/messages")
-def receive_message(data: MessageRequest):
+def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
+    msg = " ".join(data.message.strip().split())
+    now = datetime.now(KST)
 
-    msg = data.message.strip()
-
-    # 서버 테스트
     if "포고봇 테스트" in msg:
-
-        return {
-            "reply": "✅ Pokémon GO 봇 서버 연결 정상입니다."
-        }
-
-    # 도움말
+        return {"reply": "✅ Pokemon GO 봇 서버 연결 정상입니다."}
     if "포고봇 도움말" in msg:
-
         return {
             "reply": (
-                "🤖 Pokémon GO 봇\n\n"
-                "포고봇 오늘\n"
-                "포고봇 내일\n"
-                "포고봇 이번주\n"
+                "🤖 Pokemon GO 봇\n\n"
+                "포고봇 오늘 / 내일 / 이번주\n"
+                "포고봇 레이드 / 레이드아워\n"
+                "포고봇 스포트라이트 / 커뮤\n"
+                "포고봇 다음 이벤트 / 지금 뭐해\n"
                 "포고봇 테스트"
             )
         }
+    if "포고봇 지금" in msg:
+        return {
+            "reply": event_reply(
+                "🎯 현재 진행 중인 일정",
+                current_events(db, now),
+                "현재 진행 중인 Pokemon GO 일정이 없습니다.",
+            )
+        }
+    if "포고봇 다음" in msg:
+        event = next_event(db, now)
+        return {"reply": format_event(event) if event else "예정된 Pokemon GO 일정이 없습니다."}
 
-    # 오늘
+    filters = [
+        ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),
+        ("스포트라이트", {"spotlight_hour"}, "🔦 앞으로 7일간 스포트라이트 아워"),
+        ("커뮤", {"community_day"}, "👥 앞으로 30일간 커뮤니티 데이"),
+        ("레이드", {"raid", "raid_hour"}, "⚔️ 앞으로 7일간 레이드 일정"),
+    ]
+    for keyword, categories, title in filters:
+        if f"포고봇 {keyword}" in msg:
+            days = 30 if keyword == "커뮤" else 7
+            return {
+                "reply": event_reply(
+                    title,
+                    events_between(db, now, now + timedelta(days=days), categories),
+                    f"앞으로 {days}일간 해당 일정이 없습니다.",
+                )
+            }
+
     if "포고봇 오늘" in msg:
-
-        now = datetime.now(KST)
-
-        start = datetime.combine(
-            now.date(),
-            time.min,
-            tzinfo=KST,
-        )
-
-        end = start + timedelta(days=1)
-
-        events = get_events_between(start, end)
-
-        if not events:
-
-            return {
-                "reply": "📅 오늘 등록된 Pokémon GO 일정이 없습니다."
-            }
-
-        text = "📅 오늘의 Pokémon GO 일정\n\n"
-
-        text += "\n\n".join(
-            format_event(event)
-            for event in events
-        )
-
-        return {
-            "reply": text
-        }
-
-    # 내일
+        start, end = day_window()
+        events = events_between(db, start, end)
+        return {"reply": event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")}
     if "포고봇 내일" in msg:
-
-        now = datetime.now(KST)
-
-        tomorrow = now.date() + timedelta(days=1)
-
-        start = datetime.combine(
-            tomorrow,
-            time.min,
-            tzinfo=KST,
-        )
-
-        end = start + timedelta(days=1)
-
-        events = get_events_between(start, end)
-
-        if not events:
-
-            return {
-                "reply": "📅 내일 등록된 Pokémon GO 일정이 없습니다."
-            }
-
-        text = "📅 내일의 Pokémon GO 일정\n\n"
-
-        text += "\n\n".join(
-            format_event(event)
-            for event in events
-        )
-
-        return {
-            "reply": text
-        }
-
-    # 이번주
+        start, end = day_window(1)
+        events = events_between(db, start, end)
+        return {"reply": event_reply("📅 내일의 Pokemon GO 일정", events, "📅 내일 등록된 일정이 없습니다.")}
     if "포고봇 이번주" in msg:
-
-        now = datetime.now(KST)
-
-        start = datetime.combine(
-            now.date(),
-            time.min,
-            tzinfo=KST,
-        )
-
-        end = start + timedelta(days=7)
-
-        events = get_events_between(start, end)
-
-        if not events:
-
-            return {
-                "reply": "📅 앞으로 7일간 등록된 일정이 없습니다."
-            }
-
-        text = "📅 앞으로 7일간 Pokémon GO 일정\n\n"
-
-        text += "\n\n".join(
-            format_event(event)
-            for event in events
-        )
-
-        return {
-            "reply": text
-        }
-
-    return {
-        "reply": None
-    }
+        start, _ = day_window()
+        events = events_between(db, start, start + timedelta(days=7))
+        return {"reply": event_reply("📅 앞으로 7일간 Pokemon GO 일정", events, "📅 앞으로 7일간 등록된 일정이 없습니다.")}
+    return {"reply": None}

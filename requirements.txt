@@ -1,4 +1,5 @@
-fastapi
+fastapi>=0.115,<1
 uvicorn[standard]
-sqlalchemy
+sqlalchemy>=2.0,<3
 psycopg2-binary
+openai>=1.68.0,<3
