@@ -1,14 +1,21 @@
 import os
 
 from fastapi import FastAPI
+from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 
 app = FastAPI(
     title="Pokemon GO Kakao Bot",
-    version="0.2.0"
+    version="0.3.0"
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+class MessageRequest(BaseModel):
+    room: str
+    sender: str
+    message: str
 
 
 @app.get("/")
@@ -57,3 +64,31 @@ def db_check():
             "database": "connection_failed",
             "message": str(e)
         }
+
+
+@app.post("/api/messages")
+def receive_message(data: MessageRequest):
+
+    msg = data.message.strip()
+
+    if "포고봇 테스트" in msg:
+        return {
+            "reply": "✅ Pokémon GO 봇 서버 연결 정상입니다."
+        }
+
+    if "포고봇 도움말" in msg:
+        return {
+            "reply": (
+                "🤖 Pokémon GO 봇 도움말\n\n"
+                "포고봇 테스트\n"
+                "포고봇 오늘\n"
+                "포고봇 내일\n"
+                "포고봇 이번주\n"
+                "포고봇 레이드\n"
+                "포고봇 커뮤"
+            )
+        }
+
+    return {
+        "reply": None
+    }
