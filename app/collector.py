@@ -204,7 +204,7 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
         # opaque "upstream error" 502 with no detail. max_retries=0 because the
         # SDK's default auto-retry would otherwise re-attempt the full timeout
         # window up to 3x on top of our own schema-correction retry below.
-        timeout=120.0,
+        timeout=180.0,
         max_retries=0,
     )
     structure_prompt = _build_structure_prompt(prompt, source_text)
