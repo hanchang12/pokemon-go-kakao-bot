@@ -25,8 +25,12 @@ USER_AGENT = "pokemon-go-kakao-bot/1.0"
 # 기사 본문만 남기기 위해 통째로 버리는 요소들
 DROP_TAGS = {"script", "style", "nav", "header", "footer", "noscript", "svg"}
 
-MAX_ARTICLES = 30
-MAX_ARTICLE_CHARS = 3500
+# Kept small on purpose: this text goes straight into the structuring LLM
+# call, and slower providers (e.g. NVIDIA NIM's free tier) can time out well
+# before finishing a much larger prompt. 12 articles covers roughly the last
+# 2-3 weeks of announcements at this site's typical posting cadence.
+MAX_ARTICLES = 12
+MAX_ARTICLE_CHARS = 2000
 
 
 @dataclass
