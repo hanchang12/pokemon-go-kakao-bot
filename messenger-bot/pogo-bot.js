@@ -111,15 +111,15 @@ bot.addListener(Event.MESSAGE, function (msg) {
     // 기다렸다가 보낸다. (예전엔 다른 채팅이 와야만 결과가 배달되는 폴링 방식이었음)
     if (data.await_collect) {
       try {
-        const result = runCollectBlocking();
-        msg.reply(result || "⚠️ 수집 결과를 받지 못했습니다.");
+        const collectResult = runCollectBlocking();
+        msg.reply(collectResult || "⚠️ 수집 결과를 받지 못했습니다.");
       } catch (e2) {
         msg.reply("⚠️ 수집 완료 확인 중 오류\n" + e2);
       }
     } else if (data.await_ask) {
       try {
-        const result = runAskBlocking(msg.room, msg.author.name, text);
-        msg.reply(result || "⚠️ 답변을 받지 못했습니다.");
+        const askResult = runAskBlocking(msg.room, msg.author.name, text);
+        msg.reply(askResult || "⚠️ 답변을 받지 못했습니다.");
       } catch (e2) {
         msg.reply("⚠️ 답변 확인 중 오류\n" + e2);
       }
