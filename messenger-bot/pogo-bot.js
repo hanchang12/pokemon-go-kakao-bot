@@ -14,10 +14,11 @@
  *
  * 예약 발송("포고봇 예약 09:00" 등)이 동작하려면 서버에 쌓인 대기열을 주기적으로
  * 확인해서 bot.send()로 방에 전달해야 하는데, 이 앱 버전에서는 setInterval이
- * 실제로 돌지 않는다(재컴파일 직후에도 한 번도 안 불림 - 직접 확인됨). 대신
- * Event.MESSAGE는 확실히 매번 호출되므로, 아무 메시지나 올 때마다(포고봇 접두사
- * 없어도) 대기열을 확인하는 방식으로 대체한다. 방에 메시지가 전혀 없으면 그동안은
- * 확인이 안 된다는 한계가 있음 - 너무 자주 서버를 부르지 않도록 디바운스한다.
+ * 실제로 돌지 않는다(재컴파일 직후에도 한 번도 안 불림 - 직접 확인됨). 대신 두
+ * 가지를 트리거로 쓴다: Event.MESSAGE(메시지가 올 때마다, 포고봇 접두사 없어도)와
+ * Event.TICK(채팅과 무관하게 주기적으로 발생 - 이 앱이 지원하면 대화 없는 방도
+ * 커버됨, 미지원이면 등록만 조용히 실패하고 MESSAGE 트리거로만 동작). 둘 다
+ * 같은 디바운스를 공유해서 서버를 너무 자주 부르지 않는다.
  *
  * 서버: FastAPI on Railway, POST /api/messages, GET /api/subscriptions/due
  */
@@ -102,6 +103,16 @@ function maybePollDueSubscriptions() {
   if (now - lastPollAt < POLL_DEBOUNCE_MS) return;
   lastPollAt = now;
   pollDueSubscriptions();
+}
+
+/* Event.TICK이 이 앱에서 지원되면 대화 없는 방에서도 예약 발송이 도착한다.
+   미지원 환경이면 addListener가 실패해도 MESSAGE 트리거는 그대로 남는다. */
+try {
+  bot.addListener(Event.TICK, function () {
+    maybePollDueSubscriptions();
+  });
+} catch (e) {
+  Log.e("TICK 리스너 등록 실패 (이 앱은 미지원): " + e);
 }
 
 /* 메신저봇R 편집기에서 버튼으로 직접 실행해 볼 때 사용 / 컴파일 시 1회 호출됨 */
