@@ -30,19 +30,19 @@ def delete_event(db: Session, event_id: int) -> bool:
 
 
 def delete_duplicate_events(db: Session) -> int:
-    """같은 분류·시작·종료 시각의 이벤트가 여러 행으로 남아있을 때 가장 최근
-    행(id가 가장 큰 행)만 남기고 나머지를 지운다.
+    """같은 시작·종료 시각의 이벤트가 여러 행으로 남아있을 때 가장 최근 행(id가
+    가장 큰 행)만 남기고 나머지를 지운다.
 
     소스가 바뀌면(예: Leek Duck 영문 -> 공식 한국 뉴스 한글, 또는 커뮤니티 소스
     재수집 시 URL이 달라지는 경우) upsert_event의 source_url 기반 external_key도
-    함께 바뀌어 예전 행이 그대로 남는다. 이 함수는 source_url이 달라도 실제로는
-    같은 이벤트로 보이는 행(분류+시작+종료 시각이 완전히 같은 경우)을 정리한다.
+    함께 바뀌어 예전 행이 그대로 남는다. category는 매칭 기준에서 뺐다 - 같은
+    실제 이벤트를 서로 다른 수집 실행에서 Gemini가 event/research_day처럼 다른
+    분류로 넣는 경우가 실제로 관측됐다(제목·시각은 동일).
     """
     newer = aliased(Event)
     older_ids = select(Event.id).join(
         newer,
         and_(
-            Event.category == newer.category,
             Event.start_at == newer.start_at,
             Event.end_at == newer.end_at,
             Event.id < newer.id,
@@ -114,17 +114,18 @@ def current_events(db: Session, now: datetime) -> list[Event]:
 
 
 def next_events(db: Session, now: datetime, limit: int = 3) -> list[Event]:
-    """앞으로 시작할 이벤트를 최대 limit개, 중복(같은 분류·시작·종료 시각) 없이 반환한다.
+    """앞으로 시작할 이벤트를 최대 limit개, 중복(같은 시작·종료 시각) 없이 반환한다.
 
-    같은 실제 이벤트가 소스가 달라 별도 행으로 남아 있을 수 있어(예: 출처 URL이
-    바뀐 경우), 여기서는 표시 시점에 한 번 더 걸러낸다.
+    같은 실제 이벤트가 소스나 category 분류가 달라 별도 행으로 남아 있을 수
+    있어(예: 출처 URL이 바뀌었거나 Gemini가 매번 다른 category를 매긴 경우),
+    여기서는 표시 시점에 한 번 더 걸러낸다.
     """
     query = select(Event).where(Event.start_at >= now).order_by(Event.start_at, Event.title)
 
     results: list[Event] = []
     seen: set[tuple] = set()
     for event in db.scalars(query):
-        key = (event.category, event.start_at, event.end_at)
+        key = (event.start_at, event.end_at)
         if key in seen:
             continue
         seen.add(key)
