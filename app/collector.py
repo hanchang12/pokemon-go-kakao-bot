@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -302,12 +301,21 @@ def answer_question(question: str, context: str) -> str:
     return content.strip()
 
 
+TRANSLATE_BATCH_SIZE = 25
+
+
 def translate_pokemon_names_to_korean(names: list[str]) -> dict[str, str]:
     """영문 포켓몬 이름(메가/섀도/폼 접두어 포함)을 한국 공식 명칭으로 번역한다.
 
     티어리스트 갱신(한 달에 한 번, app/tier_service.py)에서만 호출돼서 NVIDIA
     무료 티어가 느려도 채팅 응답을 막지 않는다. 번역 실패한 이름은 결과
     딕셔너리에서 빠지고, 호출부가 원문(영문) 그대로 쓰도록 둔다.
+
+    번호-줄 순서로 매칭했더니(구버전) 목록이 길어지면(150개+) AI가 몇 줄을
+    빠뜨리거나 순서를 밀려 써서 이름-번역이 완전히 어긋나는 사고가 실제로
+    있었다(예: 물 타입 목록에 라티오스가 섞여 나옴). 그래서 영문 이름 자체를
+    JSON 키로 매칭하고(순서 무관), 한 번에 너무 많이 시키지 않도록 배치도
+    나눈다.
     """
     if not names:
         return {}
@@ -317,7 +325,13 @@ def translate_pokemon_names_to_korean(names: list[str]) -> dict[str, str]:
         timeout=180.0,
         max_retries=0,
     )
-    numbered = "\n".join(f"{i}. {name}" for i, name in enumerate(names, start=1))
+    translated: dict[str, str] = {}
+    for start in range(0, len(names), TRANSLATE_BATCH_SIZE):
+        translated.update(_translate_batch(client, names[start : start + TRANSLATE_BATCH_SIZE]))
+    return translated
+
+
+def _translate_batch(client: OpenAI, names: list[str]) -> dict[str, str]:
     response = client.chat.completions.create(
         model=os.getenv("NVIDIA_MODEL", "google/gemma-4-31b-it"),
         messages=[
@@ -325,28 +339,33 @@ def translate_pokemon_names_to_korean(names: list[str]) -> dict[str, str]:
                 "role": "system",
                 "content": (
                     "당신은 Pokemon GO 한국어 번역가입니다. 주어진 영문 포켓몬 이름 "
-                    "목록을 한국 공식 명칭으로 번역하세요. 'Mega'는 '메가', "
-                    "'Shadow'는 '섀도', 'Primal'은 '프라이멀', 'Dynamax'는 '다이맥스', "
+                    "배열을 한국 공식 명칭으로 번역해서 {\"영문이름\": \"한국어이름\"} "
+                    "형태의 JSON 객체 하나로만 답하세요. 'Mega'는 '메가', 'Shadow'는 "
+                    "'섀도', 'Primal'은 '프라이멀', 'Dynamax'는 '다이맥스', "
                     "'Gigantamax'는 '거다이맥스'로 옮기고, 지역폼(Galarian/Alolan/"
-                    "Hisuian 등)과 그 외 폼 이름도 한국 정발 명칭을 쓰세요. 입력과 "
-                    "정확히 같은 줄 수로, 각 줄 '번호. 한국어이름' 형식으로만 "
-                    "답하세요. 다른 설명은 넣지 마세요."
+                    "Hisuian 등)과 그 외 폼 이름도 한국 정발 명칭을 쓰세요. 키는 "
+                    "입력받은 영문 이름을 정확히 그대로 쓰고, JSON 외의 다른 "
+                    "텍스트는 넣지 마세요."
                 ),
             },
-            {"role": "user", "content": numbered},
+            {"role": "user", "content": json.dumps(names, ensure_ascii=False)},
         ],
+        response_format={"type": "json_object"},
         temperature=0.1,
     )
-    content = response.choices[0].message.content or ""
-    translated: dict[str, str] = {}
-    for line in content.splitlines():
-        match = re.match(r"\s*(\d+)\.\s*(.+)", line.strip())
-        if not match:
-            continue
-        index = int(match.group(1)) - 1
-        if 0 <= index < len(names):
-            translated[names[index]] = match.group(2).strip()
-    return translated
+    content = response.choices[0].message.content
+    if not content:
+        return {}
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    name_set = set(names)
+    return {
+        name: value for name, value in data.items() if name in name_set and isinstance(value, str)
+    }
 
 
 def build_source_text(now: datetime) -> str:

@@ -184,8 +184,9 @@ def test_unknown_provider_is_rejected():
         collector._require_provider_key("unknown")
 
 
-def test_translate_pokemon_names_parses_numbered_lines(monkeypatch):
-    client, completions = fake_client(["1. 메가리자몽Y\n2. 섀도 가이오가"])
+def test_translate_pokemon_names_matches_by_json_key(monkeypatch):
+    payload = json.dumps({"Mega Charizard Y": "메가리자몽Y", "Shadow Kyogre": "섀도 가이오가"})
+    client, completions = fake_client([payload])
     monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
     monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
 
@@ -198,16 +199,45 @@ def test_translate_pokemon_names_parses_numbered_lines(monkeypatch):
         "Shadow Kyogre": "섀도 가이오가",
     }
     assert "Mega Charizard Y" in completions.calls[0]["messages"][-1]["content"]
+    assert completions.calls[0]["response_format"] == {"type": "json_object"}
 
 
-def test_translate_pokemon_names_skips_unparseable_lines(monkeypatch):
-    client, _ = fake_client(["1. 메가리자몽Y\n(설명 없음)\n"])
+def test_translate_pokemon_names_ignores_hallucinated_keys(monkeypatch):
+    payload = json.dumps({"Mega Charizard Y": "메가리자몽Y", "Not Requested": "존재안함"})
+    client, _ = fake_client([payload])
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
+
+    result = collector.translate_pokemon_names_to_korean(["Mega Charizard Y"])
+
+    assert result == {"Mega Charizard Y": "메가리자몽Y"}
+
+
+def test_translate_pokemon_names_missing_entry_omitted(monkeypatch):
+    payload = json.dumps({"Mega Charizard Y": "메가리자몽Y"})
+    client, _ = fake_client([payload])
     monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
     monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
 
     result = collector.translate_pokemon_names_to_korean(["Mega Charizard Y", "Unmapped"])
 
     assert result == {"Mega Charizard Y": "메가리자몽Y"}
+
+
+def test_translate_pokemon_names_batches_large_lists(monkeypatch):
+    names = [f"Pokemon{i}" for i in range(30)]
+    batch1 = {name: f"번역{i}" for i, name in enumerate(names[:25])}
+    batch2 = {name: f"번역{i + 25}" for i, name in enumerate(names[25:])}
+    client, completions = fake_client([json.dumps(batch1), json.dumps(batch2)])
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
+
+    result = collector.translate_pokemon_names_to_korean(names)
+
+    assert len(completions.calls) == 2
+    assert len(result) == 30
+    assert result["Pokemon0"] == "번역0"
+    assert result["Pokemon29"] == "번역29"
 
 
 def test_translate_pokemon_names_empty_input_skips_api_call(monkeypatch):
