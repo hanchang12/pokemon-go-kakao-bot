@@ -34,6 +34,7 @@ from app.subscription_service import (
     parse_time_of_day,
     upsert_subscription,
 )
+from app.tier_service import get_tier_section, refresh_tier_list
 from app.type_chart import ALL_TYPES, format_matchup
 
 
@@ -206,11 +207,27 @@ def _run_collection(db: Session) -> str:
         return f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
 
 
+TIER_KEYWORDS = ("티어", "최고", "베스트", "순위", "탑", "추천")
+
+
 def _answer_question(db: Session, question: str) -> str:
     """도움말에 없는 자유 질문에 답하고 카톡에 보낼 문구를 반환한다."""
     now = datetime.now(KST)
     events = events_between(db, now, now + timedelta(days=30))
     context = "\n\n".join(format_event(e) for e in events) or "등록된 일정 없음"
+
+    # "불꽃 타입 최고 포켓몬" 같은 질문은 AI 자체 지식만으론 이름을 지어낼 수
+    # 있어서(관측됨), 실제 티어리스트 캐시가 있으면 근거로 덧붙인다.
+    if any(keyword in question for keyword in TIER_KEYWORDS):
+        matched_type = next((t for t in ALL_TYPES if t in question), None)
+        if matched_type:
+            pokemon = get_tier_section(db, matched_type)
+            if pokemon:
+                context += (
+                    f"\n\n{matched_type} 타입 상위 공격 포켓몬(실제 티어리스트 "
+                    f"기준, 순위 순): {', '.join(pokemon)}"
+                )
+
     try:
         return "🤖 " + answer_question(question, context)
     except Exception as exc:
@@ -276,6 +293,18 @@ def collect_blocking(db: Session = Depends(get_db)):
 def ask_blocking(data: MessageRequest, db: Session = Depends(get_db)):
     """자유 질문 채팅 명령의 두 번째(블로킹) 호출. /api/collect와 같은 이유."""
     return {"reply": _answer_question(db, data.message)}
+
+
+@app.post("/api/admin/tier-refresh", dependencies=[Depends(require_admin)])
+def tier_refresh(db: Session = Depends(get_db)):
+    """정기 수집(한 달 주기)을 기다리지 않고 티어리스트를 즉시 갱신한다."""
+    try:
+        refresh_tier_list(db)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"tier list fetch failed: {safe_error_detail(exc)}"
+        ) from exc
+    return {"status": "refreshed"}
 
 
 @app.delete("/api/admin/events/dedupe", dependencies=[Depends(require_admin)])

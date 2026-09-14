@@ -12,6 +12,7 @@ from app import collector as collector_module
 from app.db import Base, SessionLocal, engine
 from app.event_service import upsert_event
 from app.main import app
+from app.models import TierList, utc_now
 from app.schemas import CollectedEvent, CollectedEvents
 
 
@@ -340,6 +341,63 @@ def test_ask_endpoint_runs_question_and_reports_answer(monkeypatch):
     )
 
     assert "답변입니다" in response.json()["reply"]
+
+
+def test_ask_endpoint_includes_tier_data_for_tier_style_questions(monkeypatch):
+    captured = {}
+
+    def fake_answer_question(question, context):
+        captured["context"] = context
+        return "답변입니다"
+
+    monkeypatch.setattr(main_module, "answer_question", fake_answer_question)
+    monkeypatch.setattr(
+        main_module, "get_tier_section", lambda db, korean_type: ["메가리자몽와이"]
+    )
+
+    client.post(
+        "/api/ask",
+        json={"room": "test", "sender": "tester", "message": "불꽃 타입 최고 포켓몬 뭐야?"},
+    )
+
+    assert "메가리자몽와이" in captured["context"]
+
+
+def test_ask_endpoint_skips_tier_lookup_for_non_tier_questions(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main_module, "answer_question", lambda question, context: "답변입니다")
+    monkeypatch.setattr(
+        main_module,
+        "get_tier_section",
+        lambda db, korean_type: calls.append(korean_type) or ["X"],
+    )
+
+    client.post(
+        "/api/ask",
+        json={"room": "test", "sender": "tester", "message": "불꽃 이벤트 언제 끝나?"},
+    )
+
+    assert calls == []
+
+
+def test_tier_refresh_endpoint_requires_admin_token():
+    response = client.post("/api/admin/tier-refresh", headers={"x-admin-token": "wrong"})
+    assert response.status_code == 401
+
+
+def test_tier_refresh_endpoint_stores_fetched_data(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "refresh_tier_list",
+        lambda db: db.add(TierList(id=1, data={"불꽃": ["X"]}, updated_at=utc_now())),
+    )
+
+    response = client.post(
+        "/api/admin/tier-refresh", headers={"x-admin-token": "test-admin-token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "refreshed"}
 
 
 def test_ask_endpoint_reports_failure(monkeypatch):

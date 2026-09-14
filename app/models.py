@@ -53,6 +53,20 @@ class Outbox(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class TierList(Base):
+    """타입별 최고 공격 포켓몬 목록 캐시 (외부 티어리스트 사이트에서 월 1회 수집).
+
+    항상 id=1 하나만 존재하는 싱글턴 행 - 게임 밸런스 패치로 바뀌는 데이터라
+    매번 다시 긁지 않고 캐시해서 갱신일만 보고 갱신 여부를 판단한다.
+    """
+
+    __tablename__ = "tier_lists"
+
+    id = Column(Integer, primary_key=True)
+    data = Column(JSON, nullable=False)  # {"불꽃": ["Mega Blaziken", ...], ...}
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class CollectRun(Base):
     __tablename__ = "collect_runs"
 
