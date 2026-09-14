@@ -460,7 +460,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         if not pokemon:
             return {"reply": "🏆 아직 티어리스트 데이터가 없어요. 잠시 후 다시 시도해주세요."}
         ranked = "\n".join(f"{i}. {name}" for i, name in enumerate(pokemon, start=1))
-        return {"reply": f"🏆 {type_name} 타입 상위 공격 포켓몬 (pokebase.app 기준)\n{ranked}"}
+        return {"reply": f"🏆 {type_name} 타입 상위 공격 포켓몬\n{ranked}"}
 
     filters = [
         ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),
