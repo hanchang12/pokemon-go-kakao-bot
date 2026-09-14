@@ -385,12 +385,26 @@ def test_evolution_command_reports_unknown_species(monkeypatch):
     assert "찾을 수 없어요" in reply
 
 
-def test_unmatched_pogo_command_acks_and_flags_await_ask(monkeypatch):
-    response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
+def test_question_command_acks_and_flags_await_ask(monkeypatch):
+    response = message("포고봇 질문 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
     body = response.json()
 
     assert "확인하고 있어요" in body["reply"]
     assert body["await_ask"] is True
+
+
+def test_question_command_without_content_asks_for_question():
+    response = message("포고봇 질문")
+    body = response.json()
+
+    assert "질문 내용을 같이 입력해주세요" in body["reply"]
+    assert "await_ask" not in body
+
+
+def test_unmatched_pogo_command_returns_none():
+    response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
+
+    assert response.json()["reply"] is None
 
 
 def test_ask_endpoint_runs_question_and_reports_answer(monkeypatch):

@@ -64,18 +64,20 @@ COMMAND_LIST = """🤖 포고봇 명령어
 
 ℹ️ 기타
 · /포고봇 수집 — 최신 이벤트 지금 수집 (완료되면 알려드려요)
+· /포고봇 질문 [내용] — AI에게 자유 질문 (예: /포고봇 질문 이브이 최고 기술이 뭐야)
 · /포고봇 리스트 / 도움말 — 이 안내
 · /포고봇 테스트 — 서버 연결 확인
 
 일정은 공식 한국 사이트(pokemongo.com/ko) 기준입니다.
 해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다.
 
-위 명령어에 없는 질문도 "/포고봇 ..."으로 물어보면 등록된 일정을 근거로
-AI가 답해드려요 (완료되면 알려드려요)."""
+위 명령어에 없는 질문은 "/포고봇 질문 [내용]"으로 물어보면 등록된 일정을
+근거로 AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
 TIER_TYPE_PATTERN = re.compile(r"포고봇\s*티어\s*(\S+)")
 EVOLUTION_PATTERN = re.compile(r"포고봇\s*진화\s*(\S+)")
+QUESTION_PATTERN = re.compile(r"포고봇\s*질문\s*(.+)")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -297,7 +299,10 @@ def collect_blocking(db: Session = Depends(get_db)):
 @app.post("/api/ask")
 def ask_blocking(data: MessageRequest, db: Session = Depends(get_db)):
     """자유 질문 채팅 명령의 두 번째(블로킹) 호출. /api/collect와 같은 이유."""
-    return {"reply": _answer_question(db, data.message)}
+    msg = " ".join(data.message.strip().split())
+    match = QUESTION_PATTERN.search(msg)
+    question = match.group(1).strip() if match else msg
+    return {"reply": _answer_question(db, question)}
 
 
 @app.post("/api/admin/tier-refresh", dependencies=[Depends(require_admin)])
@@ -506,7 +511,11 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         events = events_between(db, start, start + timedelta(days=7))
         return {"reply": event_reply("📅 앞으로 7일간 Pokemon GO 일정", events, "📅 앞으로 7일간 등록된 일정이 없습니다.")}
 
-    if "포고봇" in msg:
+    if "포고봇 질문" in msg:
+        match = QUESTION_PATTERN.search(msg)
+        question = match.group(1).strip() if match else ""
+        if not question:
+            return {"reply": "🤖 질문 내용을 같이 입력해주세요. 예: /포고봇 질문 이브이 최고 기술이 뭐야"}
         return {
             "reply": "🤖 질문을 확인하고 있어요. 잠시 후 답변 드릴게요 (몇십 초~몇 분 걸릴 수 있어요).",
             "await_ask": True,
