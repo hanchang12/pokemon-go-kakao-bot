@@ -182,3 +182,38 @@ def test_provider_configuration_defaults_to_gemini(monkeypatch):
 def test_unknown_provider_is_rejected():
     with pytest.raises(RuntimeError, match="AI_PROVIDER"):
         collector._require_provider_key("unknown")
+
+
+def test_translate_pokemon_names_parses_numbered_lines(monkeypatch):
+    client, completions = fake_client(["1. 메가리자몽Y\n2. 섀도 가이오가"])
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
+
+    result = collector.translate_pokemon_names_to_korean(
+        ["Mega Charizard Y", "Shadow Kyogre"]
+    )
+
+    assert result == {
+        "Mega Charizard Y": "메가리자몽Y",
+        "Shadow Kyogre": "섀도 가이오가",
+    }
+    assert "Mega Charizard Y" in completions.calls[0]["messages"][-1]["content"]
+
+
+def test_translate_pokemon_names_skips_unparseable_lines(monkeypatch):
+    client, _ = fake_client(["1. 메가리자몽Y\n(설명 없음)\n"])
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setattr(collector, "OpenAI", lambda **kwargs: client)
+
+    result = collector.translate_pokemon_names_to_korean(["Mega Charizard Y", "Unmapped"])
+
+    assert result == {"Mega Charizard Y": "메가리자몽Y"}
+
+
+def test_translate_pokemon_names_empty_input_skips_api_call(monkeypatch):
+    def fail_factory(**kwargs):
+        raise AssertionError("should not call OpenAI for empty input")
+
+    monkeypatch.setattr(collector, "OpenAI", fail_factory)
+
+    assert collector.translate_pokemon_names_to_korean([]) == {}

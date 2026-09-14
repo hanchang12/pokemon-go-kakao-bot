@@ -1,9 +1,14 @@
+import logging
 from datetime import timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.collector import translate_pokemon_names_to_korean
 from app.models import TierList, utc_now
 from app.tier_source import fetch_tier_list
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 REFRESH_INTERVAL_DAYS = 30
@@ -30,6 +35,18 @@ def is_stale(db: Session) -> bool:
 
 def refresh_tier_list(db: Session) -> None:
     data = fetch_tier_list()
+
+    unique_names = sorted({name for names in data.values() for name in names})
+    try:
+        translations = translate_pokemon_names_to_korean(unique_names)
+    except Exception:
+        LOGGER.exception("포켓몬 이름 번역 실패 - 영문 이름으로 캐시한다")
+        translations = {}
+    data = {
+        korean_type: [translations.get(name, name) for name in names]
+        for korean_type, names in data.items()
+    }
+
     row = db.get(TierList, TIER_LIST_ROW_ID)
     if row is None:
         db.add(TierList(id=TIER_LIST_ROW_ID, data=data, updated_at=utc_now()))

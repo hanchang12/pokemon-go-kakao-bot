@@ -61,6 +61,40 @@ def test_refresh_tier_list_overwrites_existing_row(monkeypatch):
         assert get_tier_section(db, "불꽃") == ["New Pokemon"]
 
 
+def test_refresh_tier_list_translates_names_to_korean(monkeypatch):
+    import app.tier_service as tier_service_module
+
+    monkeypatch.setattr(
+        tier_service_module, "fetch_tier_list", lambda: {"불꽃": ["Mega Charizard Y"]}
+    )
+    monkeypatch.setattr(
+        tier_service_module,
+        "translate_pokemon_names_to_korean",
+        lambda names: {"Mega Charizard Y": "메가리자몽Y"},
+    )
+
+    with SessionLocal() as db:
+        refresh_tier_list(db)
+        assert get_tier_section(db, "불꽃") == ["메가리자몽Y"]
+
+
+def test_refresh_tier_list_falls_back_to_english_on_translation_failure(monkeypatch):
+    import app.tier_service as tier_service_module
+
+    monkeypatch.setattr(
+        tier_service_module, "fetch_tier_list", lambda: {"불꽃": ["Mega Charizard Y"]}
+    )
+
+    def fail(names):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tier_service_module, "translate_pokemon_names_to_korean", fail)
+
+    with SessionLocal() as db:
+        refresh_tier_list(db)
+        assert get_tier_section(db, "불꽃") == ["Mega Charizard Y"]
+
+
 def test_get_tier_section_missing_type_returns_none():
     with SessionLocal() as db:
         db.add(TierList(id=1, data={"불꽃": ["X"]}, updated_at=utc_now()))
