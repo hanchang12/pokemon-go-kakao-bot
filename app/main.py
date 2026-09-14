@@ -34,6 +34,7 @@ from app.subscription_service import (
     parse_time_of_day,
     upsert_subscription,
 )
+from app.type_chart import ALL_TYPES, format_matchup
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -49,6 +50,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · /포고봇 레이드아워 — 매주 수 18:00
 · /포고봇 스포트라이트 — 매주 목 18:00
 · /포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
+· /포고봇 상성 [타입] — 타입 상성 (예: /포고봇 상성 불꽃)
 
 ⏰ 예약
 · /포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
@@ -67,6 +69,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 위 명령어에 없는 질문도 "/포고봇 ..."으로 물어보면 등록된 일정을 근거로
 AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
+TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -404,6 +407,14 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
                 f"다음 발송: {next_at}"
             )
         }
+
+    if "포고봇 상성" in msg:
+        match = TYPE_PATTERN.search(msg)
+        type_name = match.group(1) if match else ""
+        reply_text = format_matchup(type_name)
+        if reply_text is None:
+            reply_text = "⚔️ 타입을 알아볼 수 없어요. 예: /포고봇 상성 불꽃\n(" + ", ".join(ALL_TYPES) + ")"
+        return {"reply": reply_text}
 
     filters = [
         ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),

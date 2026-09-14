@@ -313,6 +313,17 @@ def test_help_and_unknown_message():
     assert message("안녕하세요").json() == {"reply": None}
 
 
+def test_type_matchup_command_returns_chart():
+    reply = message("포고봇 상성 불꽃").json()["reply"]
+    assert "불꽃 타입 상성" in reply
+    assert "풀" in reply
+
+
+def test_type_matchup_command_rejects_unknown_type():
+    reply = message("포고봇 상성 없는타입").json()["reply"]
+    assert "알아볼 수 없어요" in reply
+
+
 def test_unmatched_pogo_command_acks_and_flags_await_ask(monkeypatch):
     response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
     body = response.json()

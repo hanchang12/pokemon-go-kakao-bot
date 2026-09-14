@@ -263,7 +263,8 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
 
 
 def answer_question(question: str, context: str) -> str:
-    """등록된 일정을 근거로 자유 질문에 답한다.
+    """자유 질문에 답한다 - 일정 관련이면 등록된 일정 근거로, 그 외 일반 Pokemon GO
+    지식(타입 상성 조합, 포켓몬 정보, 공략 등)이면 자체 지식으로 답한다.
 
     수집(collect_events)은 AI_PROVIDER 설정을 따르지만, 여기는 수집용 Gemini
     할당량을 안 쓰려고 항상 NVIDIA 무료 티어를 쓴다. NVIDIA 무료 티어는
@@ -281,9 +282,13 @@ def answer_question(question: str, context: str) -> str:
             {
                 "role": "system",
                 "content": (
-                    "당신은 Pokemon GO 한국 이벤트 안내 봇입니다. 아래 등록된 "
-                    "일정만 근거로 한국어로 간결하게 답하세요. 목록에 없는 "
-                    "내용이면 모른다고 답하세요."
+                    "당신은 Pokemon GO 한국 안내 봇입니다. 한국어로 간결하게 답하세요. "
+                    "일정(이벤트 시작/종료, 보너스, 레이드 로테이션 등) 질문은 아래 "
+                    "등록된 일정만 근거로 답하고, 목록에 없으면 모른다고 답하세요. "
+                    "그 외 일반 Pokemon GO 지식 질문(타입 상성, 포켓몬 스탯/추천 "
+                    "포켓몬, 공략 등)은 등록된 일정과 무관하게 당신의 지식으로 답해도 "
+                    "됩니다 - 다만 최고/추천 포켓몬처럼 메타에 따라 바뀌는 내용이면 "
+                    "게임 업데이트로 최신 정보와 다를 수 있다고 짧게 덧붙이세요."
                 ),
             },
             {"role": "user", "content": f"등록된 일정:\n{context}\n\n질문: {question}"},
