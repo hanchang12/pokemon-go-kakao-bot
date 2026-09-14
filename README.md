@@ -32,7 +32,17 @@
 
 이 폴링은 채팅과 무관한 타이머가 아니라 **메시지 수신 이벤트에 얹혀서** 돕니다 - 사용 중인 메신저봇R 빌드에서는 `setInterval`도 `Event.TICK`도 실제로 발생하지 않는 것이 확인됐고(앱 UI에도 별도 예약/매크로 실행 메뉴가 없음), 유일하게 확실히 불리는 게 `Event.MESSAGE`뿐이라 아무 메시지나(포고봇 접두사 없어도) 올 때마다 20초 디바운스로 큐를 확인합니다. **즉 봇이 있는 모든 방을 통틀어 한동안 메시지가 전혀 없으면 그동안은 예약 발송도 전달되지 않습니다** (방 하나라도 활동이 있으면 전체 큐가 같이 처리되어 조용한 방 것도 함께 배달됩니다).
 
-메시지 수신은 `function response(room, msg, sender, isGroupChat, replier, ...)` 전역 훅이 아니라 `BotManager.getCurrentBot().addListener(Event.MESSAGE, function(msg) {...})` 이벤트 리스너로 등록해야 실제로 호출됩니다 - 사용 중인 메신저봇R 빌드에서 전역 훅 방식은 알림 권한·배터리 설정과 무관하게 아예 호출되지 않는 것이 확인됐습니다. 스크립트를 갱신했다면 메신저봇R 앱에서 다시 붙여넣고 컴파일해야 반영됩니다.
+메시지 수신은 `function response(room, msg, sender, isGroupChat, replier, ...)` 전역 훅이 아니라 `BotManager.getCurrentBot().addListener(Event.MESSAGE, function(msg) {...})` 이벤트 리스너로 등록해야 실제로 호출됩니다 - 사용 중인 메신저봇R 빌드에서 전역 훅 방식은 알림 권한·배터리 설정과 무관하게 아예 호출되지 않는 것이 확인됐습니다.
+
+### 스크립트 배포 (원격, 폰 직접 조작 불필요)
+
+`pogo-bot.js`는 git에는 올라가지만 Railway처럼 자동 배포되지 않습니다 - 대신 폰에 깔린 FTP 서버 앱(예: "FTP 서버" by xnano)과 MacroDroid 조합으로 원격 배포합니다:
+
+1. 폰의 FTP 앱이 `/storage/emulated/0/msgbot/Bots/<봇이름>/`을 루트로 노출 (`<봇이름>.js`, `bot.json`, `modules/` 등이 보임)
+2. PC에서 `curl -T messenger-bot/pogo-bot.js "ftp://<폰IP>:<포트>/<봇이름>.js" -u "<계정>:<비번>"`로 덮어쓰기
+3. 폰의 MacroDroid 매크로가 파일 변경을 감지(`File Changed` 트리거)해서 `com.xfl.msgbot.broadcast.compile` 브로드캐스트를 자동 전송(`Send Intent` 액션, Extra `name`=봇이름) → 메신저봇R이 자동 재컴파일
+
+ADB 무선 디버깅 페어링은 이 환경에서 계속 `protocol fault` 에러로 실패해서(원인 미상), 이 FTP+MacroDroid 방식으로 대체했습니다.
 
 ## Railway 환경 변수
 
