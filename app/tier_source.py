@@ -10,10 +10,10 @@ import re
 import httpx
 
 from app.korean_source import ArticleTextParser
+from app.pokeapi import USER_AGENT, pokeapi_korean_species_name
 
 
 TIER_LIST_URL = "https://pokebase.app/pokemon-go/p/best-attackers-by-type"
-USER_AGENT = "pokemon-go-kakao-bot/1.0"
 
 # 소스 사이트(영문) 타입 헤더 -> 한국어 타입명 (app.type_chart.ALL_TYPES와 동일 집합)
 EN_TO_KO_TYPE = {
@@ -87,8 +87,6 @@ PREFIX_TRANSLATIONS = [
 # "X"/"Y"로 쓰므로 같은 방식으로 떼어뒀다가 그대로 붙인다.
 FORM_SUFFIX_PATTERN = re.compile(r"^(.*?)\s*(\(.+\)|-\s+.+|\s[XY])$")
 
-POKEAPI_SPECIES_URL = "https://pokeapi.co/api/v2/pokemon-species/{slug}/"
-
 
 def _strip_known_prefix(name: str) -> tuple[str, str]:
     for en_prefix, ko_prefix in PREFIX_TRANSLATIONS:
@@ -102,19 +100,6 @@ def _split_form_suffix(name: str) -> tuple[str, str]:
     if match:
         return match.group(1).strip(), " " + match.group(2).strip()
     return name.strip(), ""
-
-
-def _pokeapi_korean_species_name(client: httpx.Client, base_name: str) -> str | None:
-    slug = base_name.lower().replace(" ", "-").replace("'", "").replace(".", "")
-    try:
-        response = client.get(POKEAPI_SPECIES_URL.format(slug=slug))
-        response.raise_for_status()
-    except httpx.HTTPError:
-        return None
-    for entry in response.json().get("names", []):
-        if entry["language"]["name"] == "ko":
-            return entry["name"]
-    return None
 
 
 def translate_pokemon_names_to_korean(names: list[str]) -> dict[str, str]:
@@ -135,7 +120,7 @@ def translate_pokemon_names_to_korean(names: list[str]) -> dict[str, str]:
         for name in names:
             ko_prefix, remainder = _strip_known_prefix(name)
             base_name, suffix = _split_form_suffix(remainder)
-            ko_base = _pokeapi_korean_species_name(client, base_name)
+            ko_base = pokeapi_korean_species_name(client, base_name)
             if ko_base is None:
                 continue
             translated[name] = f"{ko_prefix}{ko_base}{suffix}"

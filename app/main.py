@@ -24,6 +24,7 @@ from app.event_service import (
 )
 from app.models import CollectRun, Event
 from app.outbox_service import pop_outbox
+from app.pokeapi import fetch_evolution_chain_korean
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
 from app.subscription_service import (
@@ -53,6 +54,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · /포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
 · /포고봇 상성 [타입] — 타입 상성 (예: /포고봇 상성 불꽃)
 · /포고봇 티어 [타입] — 타입별 상위 공격 포켓몬 (예: /포고봇 티어 불꽃)
+· /포고봇 진화 [영문이름] — 진화 체인 (예: /포고봇 진화 charmander)
 
 ⏰ 예약
 · /포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
@@ -73,6 +75,7 @@ AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
 TIER_TYPE_PATTERN = re.compile(r"포고봇\s*티어\s*(\S+)")
+EVOLUTION_PATTERN = re.compile(r"포고봇\s*진화\s*(\S+)")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -461,6 +464,19 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             return {"reply": "🏆 아직 티어리스트 데이터가 없어요. 잠시 후 다시 시도해주세요."}
         ranked = "\n".join(f"{i}. {name}" for i, name in enumerate(pokemon, start=1))
         return {"reply": f"🏆 {type_name} 타입 상위 공격 포켓몬\n{ranked}"}
+
+    if "포고봇 진화" in msg:
+        match = EVOLUTION_PATTERN.search(msg)
+        species_name = match.group(1) if match else ""
+        if not species_name:
+            return {"reply": "🧬 포켓몬 영문 이름을 같이 입력해주세요. 예: /포고봇 진화 charmander"}
+        stages = fetch_evolution_chain_korean(species_name)
+        if not stages:
+            return {
+                "reply": f"🧬 '{species_name}'을(를) 찾을 수 없어요. 정확한 영문 이름으로 다시 시도해주세요."
+            }
+        chain_text = " → ".join("/".join(stage) for stage in stages)
+        return {"reply": f"🧬 진화 체인\n{chain_text}"}
 
     filters = [
         ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),

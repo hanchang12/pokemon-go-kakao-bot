@@ -347,6 +347,44 @@ def test_tier_command_reports_missing_cache():
     assert "데이터가 없어요" in reply
 
 
+def test_evolution_command_returns_chain(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "fetch_evolution_chain_korean",
+        lambda name: [["파이리"], ["리자드"], ["리자몽"]],
+    )
+
+    reply = message("포고봇 진화 charmander").json()["reply"]
+
+    assert "진화 체인" in reply
+    assert "파이리 → 리자드 → 리자몽" in reply
+
+
+def test_evolution_command_formats_branching_stage(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "fetch_evolution_chain_korean",
+        lambda name: [["이브이"], ["샤미드", "쥬피썬더"]],
+    )
+
+    reply = message("포고봇 진화 eevee").json()["reply"]
+
+    assert "이브이 → 샤미드/쥬피썬더" in reply
+
+
+def test_evolution_command_requires_a_name():
+    reply = message("포고봇 진화").json()["reply"]
+    assert "영문 이름을 같이 입력" in reply
+
+
+def test_evolution_command_reports_unknown_species(monkeypatch):
+    monkeypatch.setattr(main_module, "fetch_evolution_chain_korean", lambda name: None)
+
+    reply = message("포고봇 진화 nosuchpokemon").json()["reply"]
+
+    assert "찾을 수 없어요" in reply
+
+
 def test_unmatched_pogo_command_acks_and_flags_await_ask(monkeypatch):
     response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
     body = response.json()
