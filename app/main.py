@@ -41,31 +41,31 @@ KST = ZoneInfo("Asia/Seoul")
 COMMAND_LIST = """🤖 포고봇 명령어
 
 📅 일정
-· 포고봇 오늘 / 내일 / 이번주
-· 포고봇 지금 뭐해 — 현재 진행 중
-· 포고봇 다음 이벤트 — 새로 시작할 일정 최대 3개
+· /포고봇 오늘 / 내일 / 이번주
+· /포고봇 지금 뭐해 — 현재 진행 중
+· /포고봇 다음 이벤트 — 새로 시작할 일정 최대 3개
 
 ⚔️ 종류별
-· 포고봇 레이드 — 앞으로 7일 레이드
-· 포고봇 레이드아워 — 매주 수 18:00
-· 포고봇 스포트라이트 — 매주 목 18:00
-· 포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
+· /포고봇 레이드 — 앞으로 7일 레이드
+· /포고봇 레이드아워 — 매주 수 18:00
+· /포고봇 스포트라이트 — 매주 목 18:00
+· /포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
 
 ⏰ 예약
-· 포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
-· 포고봇 예약 매일 09:00 — 매일 09:00에 정기 발송
-· 포고봇 예약확인 — 이 방의 예약 상태 확인
-· 포고봇 예약취소 — 이 방의 예약 취소
+· /포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
+· /포고봇 예약 매일 09:00 — 매일 09:00에 정기 발송
+· /포고봇 예약확인 — 이 방의 예약 상태 확인
+· /포고봇 예약취소 — 이 방의 예약 취소
 
 ℹ️ 기타
-· 포고봇 수집 — 최신 이벤트 지금 수집 (완료되면 알려드려요)
-· 포고봇 리스트 / 도움말 — 이 안내
-· 포고봇 테스트 — 서버 연결 확인
+· /포고봇 수집 — 최신 이벤트 지금 수집 (완료되면 알려드려요)
+· /포고봇 리스트 / 도움말 — 이 안내
+· /포고봇 테스트 — 서버 연결 확인
 
 일정은 공식 한국 사이트(pokemongo.com/ko) 기준입니다.
 해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다.
 
-위 명령어에 없는 질문도 "포고봇 ..."으로 물어보면 등록된 일정을 근거로
+위 명령어에 없는 질문도 "/포고봇 ..."으로 물어보면 등록된 일정을 근거로
 AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 LOGGER = logging.getLogger(__name__)
@@ -381,8 +381,8 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             return {
                 "reply": (
                     "⏰ 예약 시간 형식이 올바르지 않습니다.\n"
-                    "포고봇 예약 09:00 (1회)\n"
-                    "포고봇 예약 매일 09:00 (정기)"
+                    "/포고봇 예약 09:00 (1회)\n"
+                    "/포고봇 예약 매일 09:00 (정기)"
                 )
             }
         send_time = parse_time_of_day(match.group(2))
@@ -395,7 +395,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
         return {
             "reply": (
-                f"✅ {kind} {subscription.send_time}에 '포고봇 오늘' 목록을 보내드릴게요.\n"
+                f"✅ {kind} {subscription.send_time}에 '/포고봇 오늘' 목록을 보내드릴게요.\n"
                 f"다음 발송: {next_at}"
             )
         }
@@ -428,7 +428,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         events = events_between(db, start, start + timedelta(days=7))
         return {"reply": event_reply("📅 앞으로 7일간 Pokemon GO 일정", events, "📅 앞으로 7일간 등록된 일정이 없습니다.")}
 
-    if msg.startswith("포고봇"):
+    if "포고봇" in msg:
         threading.Thread(
             target=_ask_ai_and_notify, args=(data.room, msg), daemon=True
         ).start()
