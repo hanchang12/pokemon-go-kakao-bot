@@ -32,10 +32,17 @@ class Event(Base):
 
 
 class Subscription(Base):
+    """방별 예약 알림 - 한 방에 종류(kind)별로 하나씩 둘 수 있다.
+
+    kind: "digest"(오늘 일정 전체, 기존 동작), "raid_hour"(매주 수 레이드아워),
+    "spotlight_hour"(매주 목 스포트라이트) - (room, kind) 조합이 실질적인 유니크 키다.
+    """
+
     __tablename__ = "subscriptions"
 
     id = Column(Integer, primary_key=True)
-    room = Column(String(200), nullable=False, unique=True)
+    room = Column(String(200), nullable=False)
+    kind = Column(String(20), nullable=False, default="digest")
     recurring = Column(Boolean, nullable=False, default=False)
     send_time = Column(String(5), nullable=False)  # "HH:MM", Asia/Seoul wall-clock
     next_fire_at = Column(DateTime(timezone=True), nullable=False, index=True)

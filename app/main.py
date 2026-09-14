@@ -30,7 +30,7 @@ from app.schemas import MessageRequest
 from app.subscription_service import (
     cancel_subscription,
     due_subscriptions,
-    get_subscription,
+    get_subscriptions,
     mark_fired,
     parse_time_of_day,
     upsert_subscription,
@@ -57,10 +57,13 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · /포고봇 진화 [영문이름] — 진화 체인 (예: /포고봇 진화 charmander)
 
 ⏰ 예약
-· /포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
-· /포고봇 예약 매일 09:00 — 매일 09:00에 정기 발송
-· /포고봇 예약확인 — 이 방의 예약 상태 확인
-· /포고봇 예약취소 — 이 방의 예약 취소
+· /포고봇 예약 09:00 — 오늘의 일정, 오늘/내일 09:00에 1회 발송
+· /포고봇 예약 매일 09:00 — 오늘의 일정, 매일 09:00에 정기 발송
+· /포고봇 예약 레이드아워 17:50 — 매주 수 레이드아워 알림
+· /포고봇 예약 스포트라이트 17:50 — 매주 목 스포트라이트 알림
+· /포고봇 예약확인 — 이 방의 예약 상태 확인 (전체)
+· /포고봇 예약취소 — 이 방의 예약 전체 취소
+· /포고봇 예약취소 레이드아워 — 레이드아워 예약만 취소
 
 ℹ️ 기타
 · /포고봇 수집 — 최신 이벤트 지금 수집 (완료되면 알려드려요)
@@ -73,7 +76,12 @@ COMMAND_LIST = """🤖 포고봇 명령어
 
 위 명령어에 없는 질문은 "/포고봇 질문 [내용]"으로 물어보면 등록된 일정을
 근거로 AI가 답해드려요 (완료되면 알려드려요)."""
-RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
+RESERVE_KIND_KEYWORDS = {"레이드아워": "raid_hour", "스포트라이트": "spotlight_hour"}
+RESERVE_KIND_LABELS = {"digest": "오늘 일정", "raid_hour": "레이드아워", "spotlight_hour": "스포트라이트"}
+RESERVE_PATTERN = re.compile(
+    r"포고봇\s*예약\s*(레이드\s*아워|스포트라이트)?\s*(매일)?\s*(\d{1,2}:\d{2})"
+)
+RESERVE_CANCEL_PATTERN = re.compile(r"포고봇\s*예약취소\s*(레이드\s*아워|스포트라이트)?")
 TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
 TIER_TYPE_PATTERN = re.compile(r"포고봇\s*티어\s*(\S+)")
 EVOLUTION_PATTERN = re.compile(r"포고봇\s*진화\s*(\S+)")
@@ -194,6 +202,27 @@ def today_digest(db: Session) -> str:
     start, end = day_window()
     events = events_between(db, start, end)
     return event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")
+
+
+def _parse_reserve_kind(keyword: str | None) -> str:
+    if keyword is None:
+        return "digest"
+    return RESERVE_KIND_KEYWORDS.get(re.sub(r"\s+", "", keyword), "digest")
+
+
+def _subscription_message(db: Session, subscription) -> str:
+    """예약 종류에 맞는 발송 문구를 만든다. digest는 기존처럼 오늘 일정 전체."""
+    if subscription.kind == "raid_hour":
+        start, end = day_window()
+        events = events_between(db, start, end, {"raid_hour"})
+        return event_reply("⚔️ 레이드아워 알림", events, "⚔️ 오늘은 등록된 레이드아워 정보가 없습니다.")
+    if subscription.kind == "spotlight_hour":
+        start, end = day_window()
+        events = events_between(db, start, end, {"spotlight_hour"})
+        return event_reply(
+            "🔦 스포트라이트 알림", events, "🔦 오늘은 등록된 스포트라이트 정보가 없습니다."
+        )
+    return today_digest(db)
 
 
 def _collection_in_progress(db: Session) -> bool:
@@ -370,7 +399,7 @@ def subscriptions_due(db: Session = Depends(get_db)):
     now = datetime.now(KST)
     items = []
     for subscription in due_subscriptions(db, now):
-        items.append({"room": subscription.room, "message": today_digest(db)})
+        items.append({"room": subscription.room, "message": _subscription_message(db, subscription)})
         mark_fired(db, subscription, now)
     for pending in pop_outbox(db):
         items.append({"room": pending.room, "message": pending.message})
@@ -408,19 +437,28 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         }
 
     if "포고봇 예약취소" in msg:
-        cancelled = cancel_subscription(db, data.room)
+        match = RESERVE_CANCEL_PATTERN.search(msg)
+        kind = _parse_reserve_kind(match.group(1)) if match and match.group(1) else None
+        cancelled = cancel_subscription(db, data.room, kind)
         db.commit()
-        return {"reply": "🗑️ 이 방의 예약을 취소했습니다." if cancelled else "등록된 예약이 없습니다."}
+        if not cancelled:
+            return {"reply": "등록된 예약이 없습니다."}
+        label = RESERVE_KIND_LABELS[kind] if kind else "전체"
+        return {"reply": f"🗑️ {label} 예약을 취소했습니다."}
 
     if "포고봇 예약확인" in msg:
-        subscription = get_subscription(db, data.room)
-        if subscription is None:
+        subscriptions = get_subscriptions(db, data.room)
+        if not subscriptions:
             return {"reply": "등록된 예약이 없습니다."}
-        kind = "매일" if subscription.recurring else "1회"
-        next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
-        return {
-            "reply": f"⏰ {kind} {subscription.send_time} 예약 중\n다음 발송: {next_at}"
-        }
+        lines = []
+        for subscription in subscriptions:
+            label = RESERVE_KIND_LABELS.get(subscription.kind, subscription.kind)
+            freq = "매주" if subscription.kind in ("raid_hour", "spotlight_hour") else (
+                "매일" if subscription.recurring else "1회"
+            )
+            next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
+            lines.append(f"⏰ {label} · {freq} {subscription.send_time} 예약 중\n다음 발송: {next_at}")
+        return {"reply": "\n\n".join(lines)}
 
     if "포고봇 예약" in msg:
         match = RESERVE_PATTERN.search(msg)
@@ -428,21 +466,25 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             return {
                 "reply": (
                     "⏰ 예약 시간 형식이 올바르지 않습니다.\n"
-                    "/포고봇 예약 09:00 (1회)\n"
-                    "/포고봇 예약 매일 09:00 (정기)"
+                    "/포고봇 예약 09:00 (오늘의 일정 1회)\n"
+                    "/포고봇 예약 매일 09:00 (오늘의 일정 정기)\n"
+                    "/포고봇 예약 레이드아워 17:50 (매주 수 레이드아워 알림)\n"
+                    "/포고봇 예약 스포트라이트 17:50 (매주 목 스포트라이트 알림)"
                 )
             }
-        send_time = parse_time_of_day(match.group(2))
+        kind = _parse_reserve_kind(match.group(1))
+        send_time = parse_time_of_day(match.group(3))
         if send_time is None:
             return {"reply": "⏰ 예약 시간은 00:00~23:59 사이로 입력해 주세요."}
-        recurring = match.group(1) is not None
-        subscription = upsert_subscription(db, data.room, send_time, recurring, now)
+        recurring = match.group(2) is not None
+        subscription = upsert_subscription(db, data.room, kind, send_time, recurring, now)
         db.commit()
-        kind = "매일" if recurring else "1회"
+        label = RESERVE_KIND_LABELS[kind]
+        freq = "매주" if kind in ("raid_hour", "spotlight_hour") else ("매일" if recurring else "1회")
         next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
         return {
             "reply": (
-                f"✅ {kind} {subscription.send_time}에 '/포고봇 오늘' 목록을 보내드릴게요.\n"
+                f"✅ {freq} {subscription.send_time}에 '{label}' 알림을 보내드릴게요.\n"
                 f"다음 발송: {next_at}"
             )
         }

@@ -37,17 +37,51 @@ def ensure_schema() -> None:
 
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
-    if "events" not in inspector.get_table_names():
-        return
 
-    existing = {column["name"] for column in inspector.get_columns("events")}
-    with engine.begin() as connection:
-        for name, sql_type in EVENT_COLUMN_MIGRATIONS.items():
-            if name not in existing:
-                connection.execute(text(f"ALTER TABLE events ADD COLUMN {name} {sql_type}"))
-        connection.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS "
-                "ix_events_external_key ON events (external_key)"
+    if "events" in inspector.get_table_names():
+        existing = {column["name"] for column in inspector.get_columns("events")}
+        with engine.begin() as connection:
+            for name, sql_type in EVENT_COLUMN_MIGRATIONS.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE events ADD COLUMN {name} {sql_type}"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "ix_events_external_key ON events (external_key)"
+                )
             )
-        )
+
+    if "subscriptions" in inspector.get_table_names():
+        sub_columns = {column["name"] for column in inspector.get_columns("subscriptions")}
+        with engine.begin() as connection:
+            if "kind" not in sub_columns:
+                connection.execute(
+                    text("ALTER TABLE subscriptions ADD COLUMN kind VARCHAR(20) DEFAULT 'digest'")
+                )
+                connection.execute(text("UPDATE subscriptions SET kind = 'digest' WHERE kind IS NULL"))
+            if engine.dialect.name == "postgresql":
+                # 예전 스키마는 room 단독 UNIQUE였다 - 방 하나에 종류(kind)별로
+                # 여러 예약을 두려면 그 단일 컬럼 제약을 걷어내야 한다. 제약
+                # 이름은 SQLAlchemy가 자동 생성해 고정돼 있지 않으니 카탈로그에서 찾는다.
+                constraint_names = connection.execute(
+                    text(
+                        """
+                        SELECT tc.constraint_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.constraint_column_usage ccu
+                          ON tc.constraint_name = ccu.constraint_name
+                         AND tc.table_schema = ccu.table_schema
+                        WHERE tc.table_name = 'subscriptions'
+                          AND tc.constraint_type = 'UNIQUE'
+                          AND ccu.column_name = 'room'
+                        """
+                    )
+                ).scalars().all()
+                for name in constraint_names:
+                    connection.execute(text(f'ALTER TABLE subscriptions DROP CONSTRAINT "{name}"'))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "ix_subscriptions_room_kind ON subscriptions (room, kind)"
+                )
+            )
