@@ -442,10 +442,6 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
     if "포고봇 상성" in msg:
         match = TYPE_PATTERN.search(msg)
         type_name = match.group(1) if match else ""
-        if not type_name:
-            # ponytail: 링크 미리보기 테스트용 임시 플레이스홀더. 미리보기 되는 거
-            # 확인되면 실제 상성표 이미지로 교체.
-            return {"reply": "https://placehold.co/800x600.png?text=Type+Chart+Test"}
         reply_text = format_matchup(type_name)
         if reply_text is None:
             reply_text = "⚔️ 타입을 알아볼 수 없어요. 예: /포고봇 상성 불꽃\n(" + ", ".join(ALL_TYPES) + ")"
