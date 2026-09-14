@@ -120,8 +120,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
       try {
         const askResult = runAskBlocking(msg.room, msg.author.name, text);
         msg.reply(askResult || "⚠️ 답변을 받지 못했습니다.");
-      } catch (e2) {
-        msg.reply("⚠️ 답변 확인 중 오류\n" + e2);
+      } catch (e3) {
+        msg.reply("⚠️ 답변 확인 중 오류\n" + e3);
       }
     }
   } catch (e) {
