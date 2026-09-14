@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.collector import collect_events
+from app.collector import answer_question, collect_events
 from app.db import SessionLocal, ensure_schema
 from app.event_service import (
     current_events,
@@ -63,7 +63,10 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · 포고봇 테스트 — 서버 연결 확인
 
 일정은 공식 한국 사이트(pokemongo.com/ko) 기준입니다.
-해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다."""
+해외에서만 열리는 이벤트는 🌏 표시로 아래에 따로 묶어 보여줍니다.
+
+위 명령어에 없는 질문도 "포고봇 ..."으로 물어보면 등록된 일정을 근거로
+AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
@@ -205,6 +208,25 @@ def _run_collection_and_notify(room: str) -> None:
         except Exception as exc:
             LOGGER.exception("수동 수집 실패")
             message = f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
+        enqueue_message(db, room, message)
+        db.commit()
+
+
+def _ask_ai_and_notify(room: str, question: str) -> None:
+    """도움말에 없는 자유 질문을 NVIDIA에게 물어보고 결과를 outbox로 전달한다.
+
+    NVIDIA 무료 티어는 몇십 초~몇 분 걸릴 수 있어(수집 기능과 같은 이유),
+    카카오톡 왕복 타임아웃을 피하려고 수집과 같은 백그라운드+outbox 패턴을 쓴다.
+    """
+    with SessionLocal() as db:
+        now = datetime.now(KST)
+        events = events_between(db, now, now + timedelta(days=30))
+        context = "\n\n".join(format_event(e) for e in events) or "등록된 일정 없음"
+        try:
+            message = "🤖 " + answer_question(question, context)
+        except Exception as exc:
+            LOGGER.exception("AI 질문 답변 실패")
+            message = f"⚠️ 답변 생성 실패: {safe_error_detail(exc)}"
         enqueue_message(db, room, message)
         db.commit()
 
@@ -405,4 +427,10 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         start, _ = day_window()
         events = events_between(db, start, start + timedelta(days=7))
         return {"reply": event_reply("📅 앞으로 7일간 Pokemon GO 일정", events, "📅 앞으로 7일간 등록된 일정이 없습니다.")}
+
+    if msg.startswith("포고봇"):
+        threading.Thread(
+            target=_ask_ai_and_notify, args=(data.room, msg), daemon=True
+        ).start()
+        return {"reply": "🤖 질문을 확인하고 있어요. 잠시 후 답변 드릴게요 (몇십 초~몇 분 걸릴 수 있어요)."}
     return {"reply": None}

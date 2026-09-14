@@ -262,6 +262,40 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
     raise RuntimeError(f"NVIDIA returned invalid event data: {last_error}")
 
 
+def answer_question(question: str, context: str) -> str:
+    """등록된 일정을 근거로 자유 질문에 답한다.
+
+    수집(collect_events)은 AI_PROVIDER 설정을 따르지만, 여기는 수집용 Gemini
+    할당량을 안 쓰려고 항상 NVIDIA 무료 티어를 쓴다. NVIDIA 무료 티어는
+    느릴 수 있어(관측상 최대 몇 분) 호출부에서 백그라운드로 돌려야 한다.
+    """
+    client = OpenAI(
+        api_key=os.environ["NVIDIA_API_KEY"],
+        base_url=NVIDIA_BASE_URL,
+        timeout=180.0,
+        max_retries=0,
+    )
+    response = client.chat.completions.create(
+        model=os.getenv("NVIDIA_MODEL", "google/gemma-4-31b-it"),
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "당신은 Pokemon GO 한국 이벤트 안내 봇입니다. 아래 등록된 "
+                    "일정만 근거로 한국어로 간결하게 답하세요. 목록에 없는 "
+                    "내용이면 모른다고 답하세요."
+                ),
+            },
+            {"role": "user", "content": f"등록된 일정:\n{context}\n\n질문: {question}"},
+        ],
+        temperature=0.2,
+    )
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("NVIDIA returned no answer")
+    return content.strip()
+
+
 def build_source_text(now: datetime) -> str:
     """공식 한국 뉴스를 앞에, 한국 커뮤니티 일정을 뒤에 붙인 소스 텍스트."""
     korean = fetch_korean_records(now)

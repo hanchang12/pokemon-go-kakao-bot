@@ -309,6 +309,30 @@ def test_help_and_unknown_message():
     assert message("안녕하세요").json() == {"reply": None}
 
 
+def test_unmatched_pogo_command_runs_ai_qa_in_background(monkeypatch):
+    monkeypatch.setattr(main_module, "answer_question", lambda question, context: "답변입니다")
+    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
+
+    response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
+
+    assert "확인하고 있어요" in response.json()["reply"]
+    due_items = client.get("/api/subscriptions/due").json()["items"]
+    assert any("답변입니다" in item["message"] for item in due_items)
+
+
+def test_unmatched_pogo_command_reports_ai_failure(monkeypatch):
+    def fail(question, context):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main_module, "answer_question", fail)
+    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
+
+    message("포고봇 이상한질문")
+
+    due_items = client.get("/api/subscriptions/due").json()["items"]
+    assert any("답변 생성 실패" in item["message"] for item in due_items)
+
+
 def test_collection_provider_error_is_safe_and_actionable(monkeypatch):
     secret = "sensitive-test-api-key"
     monkeypatch.setenv("GEMINI_API_KEY", secret)
