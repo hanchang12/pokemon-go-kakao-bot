@@ -12,10 +12,12 @@
  * bot.addListener(Event.MESSAGE, ...) 이벤트 리스너로 등록해야 실제로
  * 호출된다(직접 확인됨 - 전역 훅 방식은 켜져 있어도 한 번도 안 불렸다).
  *
- * 예약 발송("포고봇 예약 09:00" 등)이 동작하려면 이 스크립트가 계속 켜져
- * 있어야 합니다 - 서버는 카카오톡 방에 직접 메시지를 보낼 수 없어서, 이
- * 스크립트가 주기적으로 서버에 "보낼 예약 있어?"라고 물어보고(POLL_INTERVAL_MS
- * 간격) bot.send()로 직접 방에 전달하는 방식입니다.
+ * 예약 발송("포고봇 예약 09:00" 등)이 동작하려면 서버에 쌓인 대기열을 주기적으로
+ * 확인해서 bot.send()로 방에 전달해야 하는데, 이 앱 버전에서는 setInterval이
+ * 실제로 돌지 않는다(재컴파일 직후에도 한 번도 안 불림 - 직접 확인됨). 대신
+ * Event.MESSAGE는 확실히 매번 호출되므로, 아무 메시지나 올 때마다(포고봇 접두사
+ * 없어도) 대기열을 확인하는 방식으로 대체한다. 방에 메시지가 전혀 없으면 그동안은
+ * 확인이 안 된다는 한계가 있음 - 너무 자주 서버를 부르지 않도록 디바운스한다.
  *
  * 서버: FastAPI on Railway, POST /api/messages, GET /api/subscriptions/due
  */
@@ -23,7 +25,9 @@
 const SERVER_URL = "https://pokemon-go-kakao-bot-production.up.railway.app";
 const PREFIX = "포고봇";
 const TIMEOUT_MS = 12000;
-const POLL_INTERVAL_MS = 60000; // 예약 발송 확인 주기 (1분)
+const POLL_INTERVAL_MS = 60000; // setInterval이 도는 환경이면 쓰일 확인 주기 (1분)
+const POLL_DEBOUNCE_MS = 20000; // 메시지 트리거 폴링 최소 간격 (20초)
+var lastPollAt = 0;
 
 const Jsoup = org.jsoup.Jsoup;
 const bot = BotManager.getCurrentBot();
@@ -45,9 +49,11 @@ function askServer(room, sender, message) {
 }
 
 bot.addListener(Event.MESSAGE, function (msg) {
+  maybePollDueSubscriptions();
+
   const text = String(msg.content).trim();
 
-  // 접두사가 없으면 완전히 무시 (일반 대화에 반응하지 않음)
+  // 접두사가 없으면 명령 처리는 하지 않음 (위의 폴링 체크는 이미 실행됨)
   if (text.indexOf(PREFIX) !== 0) return;
 
   try {
@@ -88,6 +94,14 @@ function pollDueSubscriptions() {
   } catch (e) {
     Log.e("예약 확인 중 오류: " + e);
   }
+}
+
+/* setInterval이 안 도는 환경 대응: 메시지 수신 이벤트마다 대신 확인한다 */
+function maybePollDueSubscriptions() {
+  var now = new Date().getTime();
+  if (now - lastPollAt < POLL_DEBOUNCE_MS) return;
+  lastPollAt = now;
+  pollDueSubscriptions();
 }
 
 /* 메신저봇R 편집기에서 버튼으로 직접 실행해 볼 때 사용 / 컴파일 시 1회 호출됨 */
