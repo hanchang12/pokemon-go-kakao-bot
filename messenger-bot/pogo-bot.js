@@ -13,12 +13,14 @@
  * 호출된다(직접 확인됨 - 전역 훅 방식은 켜져 있어도 한 번도 안 불렸다).
  *
  * 예약 발송("포고봇 예약 09:00" 등)이 동작하려면 서버에 쌓인 대기열을 주기적으로
- * 확인해서 bot.send()로 방에 전달해야 하는데, 이 앱 버전에서는 setInterval이
- * 실제로 돌지 않는다(재컴파일 직후에도 한 번도 안 불림 - 직접 확인됨). 대신 두
- * 가지를 트리거로 쓴다: Event.MESSAGE(메시지가 올 때마다, 포고봇 접두사 없어도)와
- * Event.TICK(채팅과 무관하게 주기적으로 발생 - 이 앱이 지원하면 대화 없는 방도
- * 커버됨, 미지원이면 등록만 조용히 실패하고 MESSAGE 트리거로만 동작). 둘 다
- * 같은 디바운스를 공유해서 서버를 너무 자주 부르지 않는다.
+ * 확인해서 bot.send()로 방에 전달해야 하는데, 이 메신저봇R 빌드에서는 채팅과
+ * 무관한 자동 실행 수단이 전부 안 먹는다 - setInterval은 재컴파일 직후에도 한
+ * 번도 안 불렸고, Event.TICK도 등록은 되지만 실제로 발생하지 않는 것이 로그로
+ * 확인됐고, 앱 UI에도 별도 예약/매크로 메뉴가 없다. 유일하게 확실히 불리는 건
+ * Event.MESSAGE뿐이라, 아무 메시지나 올 때마다(포고봇 접두사 없어도) 대기열을
+ * 확인하는 방식으로 대신한다. 한계: 봇이 있는 모든 방을 통틀어 한동안 메시지가
+ * 전혀 없으면 그동안은 예약 발송도 안 나간다 - 방 하나라도 활동이 있으면
+ * 폴링이 전체 큐를 한 번에 처리하므로 조용한 방 것도 같이 배달된다.
  *
  * 서버: FastAPI on Railway, POST /api/messages, GET /api/subscriptions/due
  */
@@ -26,7 +28,6 @@
 const SERVER_URL = "https://pokemon-go-kakao-bot-production.up.railway.app";
 const PREFIX = "포고봇";
 const TIMEOUT_MS = 12000;
-const POLL_INTERVAL_MS = 60000; // setInterval이 도는 환경이면 쓰일 확인 주기 (1분)
 const POLL_DEBOUNCE_MS = 20000; // 메시지 트리거 폴링 최소 간격 (20초)
 var lastPollAt = 0;
 
@@ -105,23 +106,8 @@ function maybePollDueSubscriptions() {
   pollDueSubscriptions();
 }
 
-/* Event.TICK이 이 앱에서 지원되면 대화 없는 방에서도 예약 발송이 도착한다.
-   미지원 환경이면 addListener가 실패해도 MESSAGE 트리거는 그대로 남는다. */
-try {
-  bot.addListener(Event.TICK, function () {
-    maybePollDueSubscriptions();
-  });
-} catch (e) {
-  Log.e("TICK 리스너 등록 실패 (이 앱은 미지원): " + e);
-}
-
-/* 메신저봇R 편집기에서 버튼으로 직접 실행해 볼 때 사용 / 컴파일 시 1회 호출됨 */
+/* 컴파일 시 1회 호출됨 - setInterval/Event.TICK 둘 다 이 빌드에서 안 불려서
+   더 이상 여기서 타이머를 등록하지 않는다 (Event.MESSAGE 트리거로 대체). */
 function onStartCompile() {
   Log.i("pogo-bot 컴파일 완료 / 서버: " + SERVER_URL);
-
-  try {
-    setInterval(pollDueSubscriptions, POLL_INTERVAL_MS);
-  } catch (e) {
-    Log.e("예약 폴링 타이머 등록 실패: " + e);
-  }
 }
