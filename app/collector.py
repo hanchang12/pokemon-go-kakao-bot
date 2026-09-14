@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.community_source import fetch_community_records
-from app.event_service import upsert_event
+from app.event_service import delete_duplicate_events, upsert_event
 from app.korean_source import fetch_korean_records
 from app.models import CollectRun, utc_now
 from app.schemas import CollectedEvents
@@ -69,9 +69,10 @@ Titles must be Korean. Reuse each source's own Korean wording (official Korean
 Pokemon names) as-is; these sources are already in Korean, so no translation is
 needed.
 
-For every spotlight_hour event, the `pokemon` field must contain the specific
-Pokemon featured that hour (e.g. 포고지지's monthly 스포트라이트아워 등장 포켓몬 list) -
-never leave it empty when the source names the Pokemon.
+For every 스포트라이트아워 (spotlight_hour) event, the `pokemon` field must contain the
+specific Pokemon featured that hour in Korean (e.g. 포고지지's monthly 스포트라이트아워
+등장 포켓몬 list) - never leave it empty when the source names one. If the source only
+shows a placeholder like "???" (not yet announced), leave pokemon empty - never guess.
 
 Set region for every event:
 - "kr" when players in Korea can take part. Worldwide events that run at local time
@@ -323,6 +324,10 @@ anything playable in Korea or "overseas" for in-person events held abroad.
             _, created = upsert_event(db, item)
             inserted += int(created)
             updated += int(not created)
+
+        # 같은 이벤트가 다른 소스로 재수집되면 upsert_event의 external_key(출처
+        # URL 기반)가 달라져 옛 행이 남을 수 있다. 매 수집 후 자동으로 정리한다.
+        delete_duplicate_events(db)
 
         run.status = "completed"
         run.finished_at = utc_now()

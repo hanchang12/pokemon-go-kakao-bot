@@ -43,7 +43,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 📅 일정
 · 포고봇 오늘 / 내일 / 이번주
 · 포고봇 지금 뭐해 — 현재 진행 중
-· 포고봇 다음 이벤트 — 새로 시작할 일정 3개
+· 포고봇 다음 이벤트 — 새로 시작할 일정 최대 3개
 
 ⚔️ 종류별
 · 포고봇 레이드 — 앞으로 7일 레이드
@@ -328,8 +328,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         }
     if "포고봇 다음" in msg:
         events = next_events(db, now, limit=3)
-        reply = "\n\n".join(format_event(e) for e in events) if events else "예정된 Pokemon GO 일정이 없습니다."
-        return {"reply": reply}
+        return {"reply": event_reply("🔜 다음 이벤트", events, "예정된 Pokemon GO 일정이 없습니다.")}
 
     if "포고봇 수집" in msg:
         if _collection_in_progress(db):

@@ -30,19 +30,18 @@ def delete_event(db: Session, event_id: int) -> bool:
 
 
 def delete_duplicate_events(db: Session) -> int:
-    """같은 이벤트(source_url+category+start_at+end_at)가 여러 행으로 남아있을 때
-    가장 최근 행(id가 가장 큰 행)만 남기고 나머지를 지운다.
+    """같은 분류·시작·종료 시각의 이벤트가 여러 행으로 남아있을 때 가장 최근
+    행(id가 가장 큰 행)만 남기고 나머지를 지운다.
 
-    소스가 바뀌어도(예: Leek Duck 영문 -> 공식 한국 뉴스 한글) upsert_event는
-    source_url 기반 external_key로 갱신하지만, 소스 자체가 바뀐 이벤트는
-    external_key도 함께 바뀌어 예전 행이 그대로 남는다. 이 함수는 그렇게 남은
-    옛 행을 정리한다.
+    소스가 바뀌면(예: Leek Duck 영문 -> 공식 한국 뉴스 한글, 또는 커뮤니티 소스
+    재수집 시 URL이 달라지는 경우) upsert_event의 source_url 기반 external_key도
+    함께 바뀌어 예전 행이 그대로 남는다. 이 함수는 source_url이 달라도 실제로는
+    같은 이벤트로 보이는 행(분류+시작+종료 시각이 완전히 같은 경우)을 정리한다.
     """
     newer = aliased(Event)
     older_ids = select(Event.id).join(
         newer,
         and_(
-            Event.source_url == newer.source_url,
             Event.category == newer.category,
             Event.start_at == newer.start_at,
             Event.end_at == newer.end_at,
@@ -115,10 +114,21 @@ def current_events(db: Session, now: datetime) -> list[Event]:
 
 
 def next_events(db: Session, now: datetime, limit: int = 3) -> list[Event]:
-    query = (
-        select(Event)
-        .where(Event.start_at >= now)
-        .order_by(Event.start_at, Event.title)
-        .limit(limit)
-    )
-    return list(db.scalars(query).all())
+    """앞으로 시작할 이벤트를 최대 limit개, 중복(같은 분류·시작·종료 시각) 없이 반환한다.
+
+    같은 실제 이벤트가 소스가 달라 별도 행으로 남아 있을 수 있어(예: 출처 URL이
+    바뀐 경우), 여기서는 표시 시점에 한 번 더 걸러낸다.
+    """
+    query = select(Event).where(Event.start_at >= now).order_by(Event.start_at, Event.title)
+
+    results: list[Event] = []
+    seen: set[tuple] = set()
+    for event in db.scalars(query):
+        key = (event.category, event.start_at, event.end_at)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(event)
+        if len(results) >= limit:
+            break
+    return results

@@ -8,10 +8,11 @@ os.environ["ADMIN_TOKEN"] = "test-admin-token"
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app import collector as collector_module
 from app.db import Base, SessionLocal, engine
 from app.event_service import upsert_event
 from app.main import app
-from app.schemas import CollectedEvent
+from app.schemas import CollectedEvent, CollectedEvents
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -35,6 +36,58 @@ def test_admin_endpoint_rejects_bad_token():
         "/api/admin/collect", headers={"x-admin-token": "wrong"}
     )
     assert response.status_code == 401
+
+
+def test_collect_auto_dedupes_cross_source_duplicate(monkeypatch):
+    # 예전 수집에서 다른 출처(예: 지금은 안 쓰는 소스)로 저장된 행을 재현한다.
+    shared_start = datetime.now(KST) + timedelta(hours=1)
+    shared_end = shared_start + timedelta(hours=3)
+    with SessionLocal() as db:
+        db.add(
+            main_module.Event(
+                external_key="legacy-key",
+                title="영문 제목",
+                category="event",
+                start_at=shared_start,
+                end_at=shared_end,
+                source_name="예전 소스",
+                source_url="https://old-source.example/raid/",
+                confidence=0.75,
+            )
+        )
+        db.commit()
+
+    fake_result = CollectedEvents(
+        events=[
+            CollectedEvent(
+                title="한글 제목",
+                category="event",
+                start_at=shared_start,
+                end_at=shared_end,
+                source_name="공식 한국 뉴스",
+                source_url="https://pokemongo.com/ko/news/sample",
+                confidence=0.9,
+            )
+        ]
+    )
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        collector_module, "_collect_from_provider", lambda provider, prompt: fake_result
+    )
+
+    response = client.post(
+        "/api/admin/collect", headers={"x-admin-token": "test-admin-token"}
+    )
+
+    assert response.status_code == 200
+    with SessionLocal() as db:
+        titles = [
+            e.title
+            for e in db.query(main_module.Event)
+            .filter(main_module.Event.title.in_(["영문 제목", "한글 제목"]))
+            .all()
+        ]
+        assert titles == ["한글 제목"]
 
 
 def _add_event(title, *, source_url="https://pokemongolive.com/sample", hours_from_now=1, start=None):
@@ -331,7 +384,7 @@ def test_overseas_event_is_marked_in_single_event_reply():
 
     reply = message("포고봇 다음 이벤트").json()["reply"]
 
-    assert reply.startswith("🌏")
+    assert "🌏 Pokémon GO 와일드 에리어: 센다이, 도호쿠" in reply
 
 
 def test_korean_event_keeps_plain_marker():
@@ -339,7 +392,24 @@ def test_korean_event_keeps_plain_marker():
 
     reply = message("포고봇 다음 이벤트").json()["reply"]
 
-    assert reply.startswith("🎮")
+    assert "🎮 수확 축제: 과사삭벌레 모으기" in reply
+
+
+def test_next_events_dedupes_and_caps_at_three():
+    shared_start = datetime.now(KST) + timedelta(hours=1)
+    _add_event("이벤트A", start=shared_start, source_url="https://pokemongolive.com/a1")
+    # 같은 category/start/end의 다른 출처 행 - 중복으로 취급돼 안 나와야 한다
+    _add_event("이벤트A-복사", start=shared_start, source_url="https://pokemongolive.com/a2")
+    _add_event("이벤트B", hours_from_now=2)
+    _add_event("이벤트C", hours_from_now=3)
+    _add_event("이벤트D", hours_from_now=4)
+
+    reply = message("포고봇 다음 이벤트").json()["reply"]
+
+    assert "이벤트A" in reply and "이벤트A-복사" not in reply
+    assert "이벤트B" in reply
+    assert "이벤트C" in reply
+    assert "이벤트D" not in reply
 
 
 def test_official_korean_source_is_listed_before_other_sources():
