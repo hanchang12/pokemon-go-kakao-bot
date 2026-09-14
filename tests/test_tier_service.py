@@ -38,6 +38,7 @@ def test_refresh_tier_list_stores_fetched_data(monkeypatch):
     monkeypatch.setattr(
         tier_service_module, "fetch_tier_list", lambda: {"불꽃": ["Mega Charizard Y"]}
     )
+    monkeypatch.setattr(tier_service_module, "translate_pokemon_names_to_korean", lambda names: {})
 
     with SessionLocal() as db:
         refresh_tier_list(db)
@@ -55,6 +56,7 @@ def test_refresh_tier_list_overwrites_existing_row(monkeypatch):
     monkeypatch.setattr(
         tier_service_module, "fetch_tier_list", lambda: {"불꽃": ["New Pokemon"]}
     )
+    monkeypatch.setattr(tier_service_module, "translate_pokemon_names_to_korean", lambda names: {})
 
     with SessionLocal() as db:
         refresh_tier_list(db)

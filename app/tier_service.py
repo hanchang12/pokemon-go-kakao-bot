@@ -3,9 +3,8 @@ from datetime import timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.collector import translate_pokemon_names_to_korean
 from app.models import TierList, utc_now
-from app.tier_source import fetch_tier_list
+from app.tier_source import fetch_tier_list, translate_pokemon_names_to_korean
 
 
 LOGGER = logging.getLogger(__name__)
