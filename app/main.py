@@ -191,25 +191,17 @@ def _collection_in_progress(db: Session) -> bool:
     return latest is not None and latest.status == "running"
 
 
-def _run_collection_and_notify(room: str) -> None:
-    """백그라운드 스레드에서 수집을 돌리고, 끝나면 outbox에 결과를 남긴다.
-
-    카카오톡 요청-응답 왕복(메신저봇R의 12초 타임아웃)보다 수집이 오래 걸릴 수
-    있어서, 명령을 받으면 즉시 응답하고 실제 수집은 별도 스레드에서 진행한다.
-    완료 결과는 /api/subscriptions/due 폴링으로 같은 방에 전달된다.
-    """
-    with SessionLocal() as db:
-        try:
-            run = collect_events(db, days=30)
-            message = (
-                "✅ 이벤트 수집 완료\n"
-                f"발견 {run.found_count} · 신규 {run.inserted_count} · 갱신 {run.updated_count}"
-            )
-        except Exception as exc:
-            LOGGER.exception("수동 수집 실패")
-            message = f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
-        enqueue_message(db, room, message)
-        db.commit()
+def _run_collection(db: Session) -> str:
+    """수집을 동기로 돌리고 카톡에 보낼 결과 문구를 반환한다."""
+    try:
+        run = collect_events(db, days=30)
+        return (
+            "✅ 이벤트 수집 완료\n"
+            f"발견 {run.found_count} · 신규 {run.inserted_count} · 갱신 {run.updated_count}"
+        )
+    except Exception as exc:
+        LOGGER.exception("채팅 수집 실패")
+        return f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
 
 
 def _ask_ai_and_notify(room: str, question: str) -> None:
@@ -268,6 +260,21 @@ def run_collection(days: int = 30, db: Session = Depends(get_db)):
         "inserted": run.inserted_count,
         "updated": run.updated_count,
     }
+
+
+@app.post("/api/collect")
+def collect_blocking(db: Session = Depends(get_db)):
+    """"포고봇 수집" 채팅 명령의 두 번째(블로킹) 호출.
+
+    첫 호출(/api/messages)이 즉시 응답으로 "시작했어요"를 준 직후, 폰 스크립트가
+    바로 이어서 이 엔드포인트를 긴 타임아웃으로 호출해 실제 수집을 동기로 기다린다.
+    완료/실패 결과가 같은 대화 흐름 안에서 바로 오도록 하기 위함 - 예전에는
+    백그라운드 스레드 + outbox 폴링으로 전달했는데, 폴링이 다른 채팅 메시지가
+    와야만 실행돼서 조용한 방에서는 결과가 영영 안 오는 문제가 있었다.
+    """
+    if _collection_in_progress(db):
+        return {"reply": "⏳ 이미 수집이 진행 중이에요."}
+    return {"reply": _run_collection(db)}
 
 
 @app.delete("/api/admin/events/dedupe", dependencies=[Depends(require_admin)])
@@ -355,10 +362,10 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
     if "포고봇 수집" in msg:
         if _collection_in_progress(db):
             return {"reply": "⏳ 이미 수집이 진행 중이에요. 완료되면 알려드릴게요."}
-        threading.Thread(
-            target=_run_collection_and_notify, args=(data.room,), daemon=True
-        ).start()
-        return {"reply": "🔄 이벤트 수집을 시작했어요. 완료되면 알려드릴게요 (몇십 초~몇 분 정도 걸려요)."}
+        return {
+            "reply": "🔄 이벤트 수집을 시작했어요. 완료되면 알려드릴게요 (몇십 초~몇 분 정도 걸려요).",
+            "await_collect": True,
+        }
 
     if "포고봇 예약취소" in msg:
         cancelled = cancel_subscription(db, data.room)

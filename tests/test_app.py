@@ -264,34 +264,12 @@ class _SyncThread:
         self.target(*self.args)
 
 
-def test_collect_command_runs_in_background_and_reports_success(monkeypatch):
-    class FakeRun:
-        status = "completed"
-        found_count = 3
-        inserted_count = 1
-        updated_count = 2
-
-    monkeypatch.setattr(main_module, "collect_events", lambda db, days=30: FakeRun())
-    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
-
+def test_collect_command_acks_and_flags_await_collect(monkeypatch):
     response = message("포고봇 수집")
+    body = response.json()
 
-    assert "수집을 시작" in response.json()["reply"]
-    due_items = client.get("/api/subscriptions/due").json()["items"]
-    assert any("수집 완료" in item["message"] for item in due_items)
-
-
-def test_collect_command_reports_failure(monkeypatch):
-    def fake_collect(db, days=30):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(main_module, "collect_events", fake_collect)
-    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
-
-    message("포고봇 수집")
-
-    due_items = client.get("/api/subscriptions/due").json()["items"]
-    assert any("수집 실패" in item["message"] for item in due_items)
+    assert "수집을 시작" in body["reply"]
+    assert body["await_collect"] is True
 
 
 def test_collect_command_rejects_when_already_running():
@@ -300,6 +278,43 @@ def test_collect_command_rejects_when_already_running():
         db.commit()
 
     response = message("포고봇 수집")
+    body = response.json()
+
+    assert "이미 수집이 진행" in body["reply"]
+    assert "await_collect" not in body
+
+
+def test_collect_endpoint_runs_collection_and_reports_success(monkeypatch):
+    class FakeRun:
+        status = "completed"
+        found_count = 3
+        inserted_count = 1
+        updated_count = 2
+
+    monkeypatch.setattr(main_module, "collect_events", lambda db, days=30: FakeRun())
+
+    response = client.post("/api/collect")
+
+    assert "수집 완료" in response.json()["reply"]
+
+
+def test_collect_endpoint_reports_failure(monkeypatch):
+    def fake_collect(db, days=30):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main_module, "collect_events", fake_collect)
+
+    response = client.post("/api/collect")
+
+    assert "수집 실패" in response.json()["reply"]
+
+
+def test_collect_endpoint_rejects_when_already_running():
+    with SessionLocal() as db:
+        db.add(main_module.CollectRun(status="running"))
+        db.commit()
+
+    response = client.post("/api/collect")
 
     assert "이미 수집이 진행" in response.json()["reply"]
 

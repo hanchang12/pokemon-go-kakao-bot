@@ -22,12 +22,18 @@
  * 전혀 없으면 그동안은 예약 발송도 안 나간다 - 방 하나라도 활동이 있으면
  * 폴링이 전체 큐를 한 번에 처리하므로 조용한 방 것도 같이 배달된다.
  *
- * 서버: FastAPI on Railway, POST /api/messages, GET /api/subscriptions/due
+ * "/포고봇 수집"만은 이 폴링에 안 기댄다 - 첫 응답("시작했어요") 직후 같은
+ * 흐름에서 바로 POST /api/collect를 길게(4분) 블로킹 호출해서 완료 결과를
+ * 두 번째 msg.reply()로 보낸다. 다른 채팅이 와야만 결과가 오는 문제를 이걸로
+ * 피한다.
+ *
+ * 서버: FastAPI on Railway, POST /api/messages, POST /api/collect, GET /api/subscriptions/due
  */
 
 const SERVER_URL = "https://pokemon-go-kakao-bot-production.up.railway.app";
 const PREFIX = "/포고봇";
 const TIMEOUT_MS = 12000;
+const COLLECT_TIMEOUT_MS = 240000; // "수집" 두 번째(블로킹) 호출 - 최대 4분 대기
 const POLL_DEBOUNCE_MS = 20000; // 메시지 트리거 폴링 최소 간격 (20초)
 var lastPollAt = 0;
 
@@ -46,7 +52,21 @@ function askServer(room, sender, message) {
     .post()
     .text();
 
-  const data = JSON.parse(responseText);
+  return JSON.parse(responseText);
+}
+
+/* "포고봇 수집"의 두 번째(블로킹) 호출 - 실제 수집이 끝날 때까지 기다렸다가
+   결과 문구를 받아온다. 첫 호출의 "시작했어요" 응답과 달리 몇 분씩 걸릴 수
+   있어 타임아웃을 훨씬 길게 잡는다. */
+function runCollectBlocking() {
+  const res = Jsoup.connect(SERVER_URL + "/api/collect")
+    .ignoreContentType(true)
+    .ignoreHttpErrors(true)
+    .timeout(COLLECT_TIMEOUT_MS)
+    .method(org.jsoup.Connection.Method.POST)
+    .execute();
+
+  const data = JSON.parse(res.body());
   return data.reply;
 }
 
@@ -59,7 +79,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
   if (text.indexOf(PREFIX) !== 0) return;
 
   try {
-    const reply = askServer(msg.room, msg.author.name, text);
+    const data = askServer(msg.room, msg.author.name, text);
+    const reply = data.reply;
 
     // 서버가 reply: null 을 주면 인식하지 못한 명령 → 도움말 안내
     if (reply === null || reply === undefined || reply === "") {
@@ -68,6 +89,17 @@ bot.addListener(Event.MESSAGE, function (msg) {
     }
 
     msg.reply(reply);
+
+    // 수집 시작 응답이면, 같은 흐름 안에서 바로 이어서 완료를 기다렸다가 보낸다.
+    // (예전엔 다른 채팅이 와야만 결과가 배달되는 폴링 방식이었음)
+    if (data.await_collect) {
+      try {
+        const result = runCollectBlocking();
+        msg.reply(result || "⚠️ 수집 결과를 받지 못했습니다.");
+      } catch (e2) {
+        msg.reply("⚠️ 수집 완료 확인 중 오류\n" + e2);
+      }
+    }
   } catch (e) {
     msg.reply("⚠️ 포고봇 서버 연결 오류\n" + e);
   }
