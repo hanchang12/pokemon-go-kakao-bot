@@ -52,6 +52,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 · /포고봇 스포트라이트 — 매주 목 18:00
 · /포고봇 커뮤 — 앞으로 30일 커뮤니티 데이
 · /포고봇 상성 [타입] — 타입 상성 (예: /포고봇 상성 불꽃)
+· /포고봇 티어 [타입] — 타입별 상위 공격 포켓몬 (예: /포고봇 티어 불꽃)
 
 ⏰ 예약
 · /포고봇 예약 09:00 — 오늘/내일 09:00에 1회 발송
@@ -71,6 +72,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 AI가 답해드려요 (완료되면 알려드려요)."""
 RESERVE_PATTERN = re.compile(r"포고봇\s*예약\s*(매일)?\s*(\d{1,2}:\d{2})")
 TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
+TIER_TYPE_PATTERN = re.compile(r"포고봇\s*티어\s*(\S+)")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -444,6 +446,21 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         if reply_text is None:
             reply_text = "⚔️ 타입을 알아볼 수 없어요. 예: /포고봇 상성 불꽃\n(" + ", ".join(ALL_TYPES) + ")"
         return {"reply": reply_text}
+
+    if "포고봇 티어" in msg:
+        match = TIER_TYPE_PATTERN.search(msg)
+        type_name = match.group(1) if match else ""
+        if type_name not in ALL_TYPES:
+            return {
+                "reply": "🏆 타입을 알아볼 수 없어요. 예: /포고봇 티어 불꽃\n("
+                + ", ".join(ALL_TYPES)
+                + ")"
+            }
+        pokemon = get_tier_section(db, type_name)
+        if not pokemon:
+            return {"reply": "🏆 아직 티어리스트 데이터가 없어요. 잠시 후 다시 시도해주세요."}
+        ranked = "\n".join(f"{i}. {name}" for i, name in enumerate(pokemon, start=1))
+        return {"reply": f"🏆 {type_name} 타입 상위 공격 포켓몬 (pokebase.app 기준)\n{ranked}"}
 
     filters = [
         ("레이드아워", {"raid_hour"}, "⚔️ 앞으로 7일간 레이드아워"),

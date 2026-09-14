@@ -325,6 +325,28 @@ def test_type_matchup_command_rejects_unknown_type():
     assert "알아볼 수 없어요" in reply
 
 
+def test_tier_command_returns_cached_ranking():
+    with SessionLocal() as db:
+        db.add(TierList(id=1, data={"불꽃": ["Mega Charizard Y", "Reshiram"]}, updated_at=utc_now()))
+        db.commit()
+
+    reply = message("포고봇 티어 불꽃").json()["reply"]
+
+    assert "불꽃 타입 상위 공격 포켓몬" in reply
+    assert "1. Mega Charizard Y" in reply
+    assert "2. Reshiram" in reply
+
+
+def test_tier_command_rejects_unknown_type():
+    reply = message("포고봇 티어 없는타입").json()["reply"]
+    assert "알아볼 수 없어요" in reply
+
+
+def test_tier_command_reports_missing_cache():
+    reply = message("포고봇 티어 불꽃").json()["reply"]
+    assert "데이터가 없어요" in reply
+
+
 def test_unmatched_pogo_command_acks_and_flags_await_ask(monkeypatch):
     response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
     body = response.json()
