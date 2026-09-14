@@ -22,18 +22,19 @@
  * 전혀 없으면 그동안은 예약 발송도 안 나간다 - 방 하나라도 활동이 있으면
  * 폴링이 전체 큐를 한 번에 처리하므로 조용한 방 것도 같이 배달된다.
  *
- * "/포고봇 수집"만은 이 폴링에 안 기댄다 - 첫 응답("시작했어요") 직후 같은
- * 흐름에서 바로 POST /api/collect를 길게(4분) 블로킹 호출해서 완료 결과를
- * 두 번째 msg.reply()로 보낸다. 다른 채팅이 와야만 결과가 오는 문제를 이걸로
- * 피한다.
+ * "/포고봇 수집"과 도움말에 없는 자유 질문(AI 답변)만은 이 폴링에 안 기댄다 -
+ * 첫 응답("시작했어요"/"확인하고 있어요") 직후 같은 흐름에서 바로 긴(4분)
+ * 블로킹 호출(POST /api/collect 또는 /api/ask)로 결과를 받아 두 번째
+ * msg.reply()로 보낸다. 다른 채팅이 와야만 결과가 오는 문제를 이걸로 피한다.
  *
- * 서버: FastAPI on Railway, POST /api/messages, POST /api/collect, GET /api/subscriptions/due
+ * 서버: FastAPI on Railway, POST /api/messages, POST /api/collect, POST /api/ask,
+ * GET /api/subscriptions/due
  */
 
 const SERVER_URL = "https://pokemon-go-kakao-bot-production.up.railway.app";
 const PREFIX = "/포고봇";
 const TIMEOUT_MS = 12000;
-const COLLECT_TIMEOUT_MS = 240000; // "수집" 두 번째(블로킹) 호출 - 최대 4분 대기
+const BLOCKING_TIMEOUT_MS = 240000; // 수집/AI질문 두 번째(블로킹) 호출 - 최대 4분 대기
 const POLL_DEBOUNCE_MS = 20000; // 메시지 트리거 폴링 최소 간격 (20초)
 var lastPollAt = 0;
 
@@ -55,18 +56,34 @@ function askServer(room, sender, message) {
   return JSON.parse(responseText);
 }
 
-/* "포고봇 수집"의 두 번째(블로킹) 호출 - 실제 수집이 끝날 때까지 기다렸다가
-   결과 문구를 받아온다. 첫 호출의 "시작했어요" 응답과 달리 몇 분씩 걸릴 수
-   있어 타임아웃을 훨씬 길게 잡는다. */
+/* "포고봇 수집"/AI 질문의 두 번째(블로킹) 호출 - 실제 처리가 끝날 때까지
+   기다렸다가 결과 문구를 받아온다. 첫 호출의 즉시 응답과 달리 몇 분씩 걸릴
+   수 있어 타임아웃을 훨씬 길게 잡는다. */
 function runCollectBlocking() {
   const res = Jsoup.connect(SERVER_URL + "/api/collect")
     .ignoreContentType(true)
     .ignoreHttpErrors(true)
-    .timeout(COLLECT_TIMEOUT_MS)
+    .timeout(BLOCKING_TIMEOUT_MS)
     .method(org.jsoup.Connection.Method.POST)
     .execute();
 
   const data = JSON.parse(res.body());
+  return data.reply;
+}
+
+function runAskBlocking(room, sender, question) {
+  const payload = JSON.stringify({ room: room, sender: sender, message: question });
+
+  const responseText = Jsoup.connect(SERVER_URL + "/api/ask")
+    .header("Content-Type", "application/json")
+    .requestBody(payload)
+    .ignoreContentType(true)
+    .ignoreHttpErrors(true)
+    .timeout(BLOCKING_TIMEOUT_MS)
+    .post()
+    .text();
+
+  const data = JSON.parse(responseText);
   return data.reply;
 }
 
@@ -90,14 +107,21 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
     msg.reply(reply);
 
-    // 수집 시작 응답이면, 같은 흐름 안에서 바로 이어서 완료를 기다렸다가 보낸다.
-    // (예전엔 다른 채팅이 와야만 결과가 배달되는 폴링 방식이었음)
+    // 수집 시작/AI 질문 확인 응답이면, 같은 흐름 안에서 바로 이어서 완료를
+    // 기다렸다가 보낸다. (예전엔 다른 채팅이 와야만 결과가 배달되는 폴링 방식이었음)
     if (data.await_collect) {
       try {
         const result = runCollectBlocking();
         msg.reply(result || "⚠️ 수집 결과를 받지 못했습니다.");
       } catch (e2) {
         msg.reply("⚠️ 수집 완료 확인 중 오류\n" + e2);
+      }
+    } else if (data.await_ask) {
+      try {
+        const result = runAskBlocking(msg.room, msg.author.name, text);
+        msg.reply(result || "⚠️ 답변을 받지 못했습니다.");
+      } catch (e2) {
+        msg.reply("⚠️ 답변 확인 중 오류\n" + e2);
       }
     }
   } catch (e) {

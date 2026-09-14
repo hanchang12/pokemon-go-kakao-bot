@@ -253,17 +253,6 @@ def test_category_command_and_next_event():
     assert "테스트 커뮤니티 데이" in upcoming.json()["reply"]
 
 
-class _SyncThread:
-    """threading.Thread를 대신해 target을 즉시 동기 실행하는 테스트용 더블."""
-
-    def __init__(self, target=None, args=(), daemon=None):
-        self.target = target
-        self.args = args
-
-    def start(self):
-        self.target(*self.args)
-
-
 def test_collect_command_acks_and_flags_await_collect(monkeypatch):
     response = message("포고봇 수집")
     body = response.json()
@@ -324,28 +313,35 @@ def test_help_and_unknown_message():
     assert message("안녕하세요").json() == {"reply": None}
 
 
-def test_unmatched_pogo_command_runs_ai_qa_in_background(monkeypatch):
-    monkeypatch.setattr(main_module, "answer_question", lambda question, context: "답변입니다")
-    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
-
+def test_unmatched_pogo_command_acks_and_flags_await_ask(monkeypatch):
     response = message("포고봇 주간 릴레이 시간제한 리서치에는 뭐가 나와?")
+    body = response.json()
 
-    assert "확인하고 있어요" in response.json()["reply"]
-    due_items = client.get("/api/subscriptions/due").json()["items"]
-    assert any("답변입니다" in item["message"] for item in due_items)
+    assert "확인하고 있어요" in body["reply"]
+    assert body["await_ask"] is True
 
 
-def test_unmatched_pogo_command_reports_ai_failure(monkeypatch):
+def test_ask_endpoint_runs_question_and_reports_answer(monkeypatch):
+    monkeypatch.setattr(main_module, "answer_question", lambda question, context: "답변입니다")
+
+    response = client.post(
+        "/api/ask", json={"room": "test", "sender": "tester", "message": "질문"}
+    )
+
+    assert "답변입니다" in response.json()["reply"]
+
+
+def test_ask_endpoint_reports_failure(monkeypatch):
     def fail(question, context):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(main_module, "answer_question", fail)
-    monkeypatch.setattr(main_module.threading, "Thread", _SyncThread)
 
-    message("포고봇 이상한질문")
+    response = client.post(
+        "/api/ask", json={"room": "test", "sender": "tester", "message": "질문"}
+    )
 
-    due_items = client.get("/api/subscriptions/due").json()["items"]
-    assert any("답변 생성 실패" in item["message"] for item in due_items)
+    assert "답변 생성 실패" in response.json()["reply"]
 
 
 def test_collection_provider_error_is_safe_and_actionable(monkeypatch):

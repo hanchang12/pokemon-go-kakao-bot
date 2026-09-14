@@ -3,7 +3,6 @@ import hmac
 import logging
 import os
 import re
-import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -24,7 +23,7 @@ from app.event_service import (
     remove_test_events,
 )
 from app.models import CollectRun, Event
-from app.outbox_service import enqueue_message, pop_outbox
+from app.outbox_service import pop_outbox
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
 from app.subscription_service import (
@@ -204,23 +203,16 @@ def _run_collection(db: Session) -> str:
         return f"⚠️ 이벤트 수집 실패: {safe_error_detail(exc)}"
 
 
-def _ask_ai_and_notify(room: str, question: str) -> None:
-    """도움말에 없는 자유 질문을 NVIDIA에게 물어보고 결과를 outbox로 전달한다.
-
-    NVIDIA 무료 티어는 몇십 초~몇 분 걸릴 수 있어(수집 기능과 같은 이유),
-    카카오톡 왕복 타임아웃을 피하려고 수집과 같은 백그라운드+outbox 패턴을 쓴다.
-    """
-    with SessionLocal() as db:
-        now = datetime.now(KST)
-        events = events_between(db, now, now + timedelta(days=30))
-        context = "\n\n".join(format_event(e) for e in events) or "등록된 일정 없음"
-        try:
-            message = "🤖 " + answer_question(question, context)
-        except Exception as exc:
-            LOGGER.exception("AI 질문 답변 실패")
-            message = f"⚠️ 답변 생성 실패: {safe_error_detail(exc)}"
-        enqueue_message(db, room, message)
-        db.commit()
+def _answer_question(db: Session, question: str) -> str:
+    """도움말에 없는 자유 질문에 답하고 카톡에 보낼 문구를 반환한다."""
+    now = datetime.now(KST)
+    events = events_between(db, now, now + timedelta(days=30))
+    context = "\n\n".join(format_event(e) for e in events) or "등록된 일정 없음"
+    try:
+        return "🤖 " + answer_question(question, context)
+    except Exception as exc:
+        LOGGER.exception("AI 질문 답변 실패")
+        return f"⚠️ 답변 생성 실패: {safe_error_detail(exc)}"
 
 
 @app.get("/")
@@ -275,6 +267,12 @@ def collect_blocking(db: Session = Depends(get_db)):
     if _collection_in_progress(db):
         return {"reply": "⏳ 이미 수집이 진행 중이에요."}
     return {"reply": _run_collection(db)}
+
+
+@app.post("/api/ask")
+def ask_blocking(data: MessageRequest, db: Session = Depends(get_db)):
+    """자유 질문 채팅 명령의 두 번째(블로킹) 호출. /api/collect와 같은 이유."""
+    return {"reply": _answer_question(db, data.message)}
 
 
 @app.delete("/api/admin/events/dedupe", dependencies=[Depends(require_admin)])
@@ -436,8 +434,8 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         return {"reply": event_reply("📅 앞으로 7일간 Pokemon GO 일정", events, "📅 앞으로 7일간 등록된 일정이 없습니다.")}
 
     if "포고봇" in msg:
-        threading.Thread(
-            target=_ask_ai_and_notify, args=(data.room, msg), daemon=True
-        ).start()
-        return {"reply": "🤖 질문을 확인하고 있어요. 잠시 후 답변 드릴게요 (몇십 초~몇 분 걸릴 수 있어요)."}
+        return {
+            "reply": "🤖 질문을 확인하고 있어요. 잠시 후 답변 드릴게요 (몇십 초~몇 분 걸릴 수 있어요).",
+            "await_ask": True,
+        }
     return {"reply": None}
