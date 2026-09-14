@@ -69,6 +69,10 @@ Titles must be Korean. Reuse each source's own Korean wording (official Korean
 Pokemon names) as-is; these sources are already in Korean, so no translation is
 needed.
 
+For every spotlight_hour event, the `pokemon` field must contain the specific
+Pokemon featured that hour (e.g. 포고지지's monthly 스포트라이트아워 등장 포켓몬 list) -
+never leave it empty when the source names the Pokemon.
+
 Set region for every event:
 - "kr" when players in Korea can take part. Worldwide events that run at local time
   (레이드아워, 스포트라이트아워, 맥스먼데이, 커뮤니티 데이, raid rotations) are "kr".

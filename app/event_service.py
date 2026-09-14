@@ -114,11 +114,11 @@ def current_events(db: Session, now: datetime) -> list[Event]:
     return list(db.scalars(query).all())
 
 
-def next_event(db: Session, now: datetime) -> Event | None:
+def next_events(db: Session, now: datetime, limit: int = 3) -> list[Event]:
     query = (
         select(Event)
         .where(Event.start_at >= now)
         .order_by(Event.start_at, Event.title)
-        .limit(1)
+        .limit(limit)
     )
-    return db.scalar(query)
+    return list(db.scalars(query).all())

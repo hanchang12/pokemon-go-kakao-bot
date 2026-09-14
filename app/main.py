@@ -20,7 +20,7 @@ from app.event_service import (
     delete_event,
     delete_events_by_source_domain,
     events_between,
-    next_event,
+    next_events,
     remove_test_events,
 )
 from app.models import CollectRun, Event
@@ -43,7 +43,7 @@ COMMAND_LIST = """🤖 포고봇 명령어
 📅 일정
 · 포고봇 오늘 / 내일 / 이번주
 · 포고봇 지금 뭐해 — 현재 진행 중
-· 포고봇 다음 이벤트 — 다음 시작할 일정
+· 포고봇 다음 이벤트 — 새로 시작할 일정 3개
 
 ⚔️ 종류별
 · 포고봇 레이드 — 앞으로 7일 레이드
@@ -327,8 +327,9 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             )
         }
     if "포고봇 다음" in msg:
-        event = next_event(db, now)
-        return {"reply": format_event(event) if event else "예정된 Pokemon GO 일정이 없습니다."}
+        events = next_events(db, now, limit=3)
+        reply = "\n\n".join(format_event(e) for e in events) if events else "예정된 Pokemon GO 일정이 없습니다."
+        return {"reply": reply}
 
     if "포고봇 수집" in msg:
         if _collection_in_progress(db):
