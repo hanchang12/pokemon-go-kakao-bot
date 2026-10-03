@@ -13,14 +13,14 @@
  * 호출된다(직접 확인됨 - 전역 훅 방식은 켜져 있어도 한 번도 안 불렸다).
  *
  * 예약 발송("/포고봇 예약 09:00" 등)이 동작하려면 서버에 쌓인 대기열을 주기적으로
- * 확인해서 bot.send()로 방에 전달해야 하는데, 이 메신저봇R 빌드에서는 채팅과
- * 무관한 자동 실행 수단이 전부 안 먹는다 - setInterval은 재컴파일 직후에도 한
- * 번도 안 불렸고, Event.TICK도 등록은 되지만 실제로 발생하지 않는 것이 로그로
- * 확인됐고, 앱 UI에도 별도 예약/매크로 메뉴가 없다. 유일하게 확실히 불리는 건
- * Event.MESSAGE뿐이라, 아무 메시지나 올 때마다(/포고봇 접두사 없어도) 대기열을
- * 확인하는 방식으로 대신한다. 한계: 봇이 있는 모든 방을 통틀어 한동안 메시지가
- * 전혀 없으면 그동안은 예약 발송도 안 나간다 - 방 하나라도 활동이 있으면
- * 폴링이 전체 큐를 한 번에 처리하므로 조용한 방 것도 같이 배달된다.
+ * 확인해서 bot.send()로 방에 전달해야 하는데, JS 엔진 쪽 타이머(setInterval,
+ * Event.TICK)는 이 메신저봇R 빌드에서 실제로 호출되지 않는 것이 확인됐다(앱
+ * UI에도 별도 예약/매크로 메뉴가 없음). 대신 JS 이벤트 루프를 거치지 않는
+ * 순수 Java 스레드(java.lang.Thread + Thread.sleep 무한루프)로 직접 타이머를
+ * 돌린다 - bot.send()/Jsoup 호출은 LiveConnect로 노출된 Java 메서드라 어느
+ * 스레드에서 불러도 동작하므로, 채팅이 전혀 없어도 설정한 간격마다 큐를 확인해
+ * 보낼 수 있다(startDuePoller 참고). Event.MESSAGE 쪽 폴링은 채팅이 왔을 때
+ * 더 빠르게 전달하기 위한 보조 경로로 남겨둔다.
  *
  * "/포고봇 수집"과 도움말에 없는 자유 질문(AI 답변)만은 이 폴링에 안 기댄다 -
  * 첫 응답("시작했어요"/"확인하고 있어요") 직후 같은 흐름에서 바로 긴(4분)
@@ -154,7 +154,9 @@ function pollDueSubscriptions() {
   }
 }
 
-/* setInterval이 안 도는 환경 대응: 메시지 수신 이벤트마다 대신 확인한다 */
+/* setInterval이 안 도는 환경 대응: 메시지 수신 이벤트마다 대신 확인한다
+   (채팅이 있을 때 더 빠르게 전달하기 위한 보조 경로 - 메인 경로는
+   startDuePoller의 백그라운드 스레드) */
 function maybePollDueSubscriptions() {
   var now = new Date().getTime();
   if (now - lastPollAt < POLL_DEBOUNCE_MS) return;
@@ -162,8 +164,55 @@ function maybePollDueSubscriptions() {
   pollDueSubscriptions();
 }
 
-/* 컴파일 시 1회 호출됨 - setInterval/Event.TICK 둘 다 이 빌드에서 안 불려서
-   더 이상 여기서 타이머를 등록하지 않는다 (Event.MESSAGE 트리거로 대체). */
+const DUE_POLL_INTERVAL_MS = 30000; // 채팅과 무관하게 30초마다 예약 큐 확인
+const DUE_POLLER_THREAD_NAME = "pogo-bot-due-poller";
+
+/* 이미 같은 이름의 폴링 스레드가 떠 있는지 확인한다. 스크립트가 재컴파일되면
+   JS 쪽 전역 변수는 초기화되지만, 이전 컴파일에서 띄운 Java 스레드는 그대로
+   살아있을 수 있어 중복 스레드가 쌓이는 걸 막기 위한 안전장치다. */
+function isDuePollerRunning() {
+  try {
+    var threads = java.lang.Thread.getAllStackTraces().keySet().toArray();
+    for (var i = 0; i < threads.length; i++) {
+      if (String(threads[i].getName()) === DUE_POLLER_THREAD_NAME) return true;
+    }
+  } catch (e) {
+    Log.e("폴링 스레드 중복 확인 실패: " + e);
+  }
+  return false;
+}
+
+/* 채팅과 완전히 무관하게 동작하는 예약 발송의 메인 경로. JS 엔진의 이벤트
+   루프(setInterval/Event.TICK)에 기대지 않고, 순수 Java 스레드를 만들어
+   그 안에서 Thread.sleep으로 직접 주기를 돈다 - bot.send()/Jsoup 호출은
+   Java 메서드라 이 스레드에서 불러도 그대로 동작한다. */
+function startDuePoller() {
+  if (isDuePollerRunning()) {
+    Log.i("예약 폴링 스레드가 이미 실행 중입니다.");
+    return;
+  }
+  var thread = new java.lang.Thread(function () {
+    while (true) {
+      try {
+        java.lang.Thread.sleep(DUE_POLL_INTERVAL_MS);
+        pollDueSubscriptions();
+      } catch (e) {
+        Log.e("예약 백그라운드 폴링 중 오류: " + e);
+      }
+    }
+  });
+  thread.setName(DUE_POLLER_THREAD_NAME);
+  thread.setDaemon(true);
+  thread.start();
+  Log.i("예약 백그라운드 폴링 스레드 시작 (" + DUE_POLL_INTERVAL_MS + "ms 간격, 채팅 없어도 동작)");
+}
+
+startDuePoller();
+
+/* 컴파일 시 1회 호출됨. 위 startDuePoller()는 스크립트 로드 시점에 이미
+   실행되지만, 컴파일 타이밍에 한 번 더 확인해 혹시 스레드가 죽어 있으면
+   재시작한다(중복 방지 체크가 있어 안전하다). */
 function onStartCompile() {
   Log.i("pogo-bot 컴파일 완료 / 서버: " + SERVER_URL);
+  startDuePoller();
 }

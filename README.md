@@ -58,7 +58,7 @@
 
 서버(FastAPI)는 카카오톡 방에 직접 메시지를 보낼 수 없고, 오직 메신저봇R 스크립트만 보낼 수 있습니다. 그래서 구조는 다음과 같습니다: 서버는 예약 시각이 된 항목을 `GET /api/subscriptions/due` 큐에 담아두고, `messenger-bot/pogo-bot.js`가 이 엔드포인트를 폴링해서 `bot.send(room, message)`로 각 방에 직접 전달합니다.
 
-이 폴링은 채팅과 무관한 타이머가 아니라 **메시지 수신 이벤트에 얹혀서** 돕니다 - 사용 중인 메신저봇R 빌드에서는 `setInterval`도 `Event.TICK`도 실제로 발생하지 않는 것이 확인됐고(앱 UI에도 별도 예약/매크로 실행 메뉴가 없음), 유일하게 확실히 불리는 게 `Event.MESSAGE`뿐이라 아무 메시지나(/포고봇 접두사 없어도) 올 때마다 20초 디바운스로 큐를 확인합니다. **즉 봇이 있는 모든 방을 통틀어 한동안 메시지가 전혀 없으면 그동안은 예약 발송도 전달되지 않습니다** (방 하나라도 활동이 있으면 전체 큐가 같이 처리되어 조용한 방 것도 함께 배달됩니다).
+이 폴링은 채팅과 무관하게 동작합니다. 사용 중인 메신저봇R 빌드에서는 JS 엔진 쪽 타이머인 `setInterval`도 `Event.TICK`도 실제로 발생하지 않는 것이 확인됐지만(앱 UI에도 별도 예약/매크로 실행 메뉴가 없음), `pogo-bot.js`가 스크립트 로드 시 순수 Java 스레드(`java.lang.Thread` + `Thread.sleep` 무한루프)를 직접 띄워서 **30초마다 채팅 여부와 무관하게** 큐를 확인합니다 - `bot.send()`/`Jsoup` 호출은 LiveConnect로 노출된 Java 메서드라 JS 엔진의 이벤트 루프가 아닌 이 스레드에서 호출해도 그대로 동작합니다. 재컴파일마다 스레드가 중복으로 쌓이지 않도록, 같은 이름(`pogo-bot-due-poller`)의 스레드가 이미 떠 있으면 새로 만들지 않습니다. `Event.MESSAGE` 쪽 20초 디바운스 폴링은 채팅이 있을 때 더 빠르게 전달하기 위한 보조 경로로 남아 있습니다.
 
 메시지 수신은 `function response(room, msg, sender, isGroupChat, replier, ...)` 전역 훅이 아니라 `BotManager.getCurrentBot().addListener(Event.MESSAGE, function(msg) {...})` 이벤트 리스너로 등록해야 실제로 호출됩니다 - 사용 중인 메신저봇R 빌드에서 전역 훅 방식은 알림 권한·배터리 설정과 무관하게 아예 호출되지 않는 것이 확인됐습니다.
 
