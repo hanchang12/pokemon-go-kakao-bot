@@ -28,6 +28,7 @@ from app.pokeapi import fetch_evolution_chain_korean
 from app.scheduler import auto_collect_enabled, collection_loop
 from app.schemas import MessageRequest
 from app.subscription_service import (
+    all_subscriptions,
     cancel_subscription,
     due_subscriptions,
     get_subscriptions,
@@ -86,6 +87,7 @@ TYPE_PATTERN = re.compile(r"포고봇\s*상성\s*(\S+)")
 TIER_TYPE_PATTERN = re.compile(r"포고봇\s*티어\s*(\S+)")
 EVOLUTION_PATTERN = re.compile(r"포고봇\s*진화\s*(\S+)")
 QUESTION_PATTERN = re.compile(r"포고봇\s*질문\s*(.+)")
+ADMIN_CHAT_NAME = os.getenv("ADMIN_CHAT_NAME", "이동호")
 LOGGER = logging.getLogger(__name__)
 ensure_schema()
 
@@ -202,6 +204,20 @@ def today_digest(db: Session) -> str:
     start, end = day_window()
     events = events_between(db, start, end)
     return event_reply("📅 오늘의 Pokemon GO 일정", events, "📅 오늘 등록된 일정이 없습니다.")
+
+
+def _is_admin(data: MessageRequest) -> bool:
+    """관리자 = 카톡 단독(1:1) 채팅 '이동호'. 그룹방에서 같은 이름을 써도 통과 못 한다."""
+    return not data.is_group_chat and data.room == ADMIN_CHAT_NAME and data.sender == ADMIN_CHAT_NAME
+
+
+def _reservation_line(subscription) -> str:
+    label = RESERVE_KIND_LABELS.get(subscription.kind, subscription.kind)
+    freq = "매주" if subscription.kind in ("raid_hour", "spotlight_hour") else (
+        "매일" if subscription.recurring else "1회"
+    )
+    next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
+    return f"⏰ {label} · {freq} {subscription.send_time} 예약 중\n다음 발송: {next_at}"
 
 
 def _parse_reserve_kind(keyword: str | None) -> str:
@@ -436,6 +452,21 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
             "await_collect": True,
         }
 
+    if "포고봇 예약전체" in msg:
+        if not _is_admin(data):
+            return {"reply": None}
+        subscriptions = all_subscriptions(db)
+        if not subscriptions:
+            return {"reply": "등록된 예약이 없습니다."}
+        by_room: dict[str, list[str]] = {}
+        for subscription in subscriptions:
+            by_room.setdefault(subscription.room, []).append(_reservation_line(subscription))
+        return {
+            "reply": "\n\n".join(
+                f"📍 {room}\n" + "\n".join(lines) for room, lines in by_room.items()
+            )
+        }
+
     if "포고봇 예약취소" in msg:
         match = RESERVE_CANCEL_PATTERN.search(msg)
         kind = _parse_reserve_kind(match.group(1)) if match and match.group(1) else None
@@ -450,15 +481,7 @@ def receive_message(data: MessageRequest, db: Session = Depends(get_db)):
         subscriptions = get_subscriptions(db, data.room)
         if not subscriptions:
             return {"reply": "등록된 예약이 없습니다."}
-        lines = []
-        for subscription in subscriptions:
-            label = RESERVE_KIND_LABELS.get(subscription.kind, subscription.kind)
-            freq = "매주" if subscription.kind in ("raid_hour", "spotlight_hour") else (
-                "매일" if subscription.recurring else "1회"
-            )
-            next_at = subscription.next_fire_at.astimezone(KST).strftime("%m/%d %H:%M")
-            lines.append(f"⏰ {label} · {freq} {subscription.send_time} 예약 중\n다음 발송: {next_at}")
-        return {"reply": "\n\n".join(lines)}
+        return {"reply": "\n\n".join(_reservation_line(sub) for sub in subscriptions)}
 
     if "포고봇 예약" in msg:
         match = RESERVE_PATTERN.search(msg)

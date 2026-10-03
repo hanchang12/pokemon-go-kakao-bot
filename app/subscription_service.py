@@ -77,6 +77,10 @@ def get_subscriptions(db: Session, room: str) -> list[Subscription]:
     return list(db.scalars(select(Subscription).where(Subscription.room == room)).all())
 
 
+def all_subscriptions(db: Session) -> list[Subscription]:
+    return list(db.scalars(select(Subscription).order_by(Subscription.room, Subscription.kind)).all())
+
+
 def due_subscriptions(db: Session, now: datetime) -> list[Subscription]:
     query = select(Subscription).where(Subscription.next_fire_at <= now)
     return list(db.scalars(query).all())

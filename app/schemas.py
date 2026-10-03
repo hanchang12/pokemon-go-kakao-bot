@@ -24,6 +24,8 @@ class MessageRequest(BaseModel):
     room: str = "unknown"
     sender: str = "unknown"
     message: str
+    # 모르는 클라이언트는 그룹으로 간주 - 단독 채팅이라고 명시해야만 관리자 판정을 받는다.
+    is_group_chat: bool = True
 
 
 EventRegion = Literal["kr", "overseas"]

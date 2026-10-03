@@ -41,8 +41,13 @@ var lastPollAt = 0;
 const Jsoup = org.jsoup.Jsoup;
 const bot = BotManager.getCurrentBot();
 
-function askServer(room, sender, message) {
-  const payload = JSON.stringify({ room: room, sender: sender, message: message });
+function askServer(room, sender, message, isGroupChat) {
+  const payload = JSON.stringify({
+    room: room,
+    sender: sender,
+    message: message,
+    is_group_chat: isGroupChat,
+  });
 
   const responseText = Jsoup.connect(SERVER_URL + "/api/messages")
     .header("Content-Type", "application/json")
@@ -96,7 +101,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
   if (text.indexOf(PREFIX) !== 0) return;
 
   try {
-    const data = askServer(msg.room, msg.author.name, text);
+    const data = askServer(msg.room, msg.author.name, text, msg.isGroupChat);
     const reply = data.reply;
 
     // 서버가 reply: null 을 주면 인식하지 못한 명령 → 도움말 안내

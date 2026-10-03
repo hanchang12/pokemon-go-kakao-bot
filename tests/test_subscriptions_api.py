@@ -264,3 +264,33 @@ def test_due_recurring_raid_hour_reschedules_a_week_ahead():
         if next_fire_at.tzinfo is None:
             next_fire_at = next_fire_at.replace(tzinfo=KST)
         assert next_fire_at.weekday() == 2  # Wednesday
+
+
+def _admin_message(text, room="이동호", sender="이동호", is_group_chat=False):
+    return client.post(
+        "/api/messages",
+        json={"room": room, "sender": sender, "message": text, "is_group_chat": is_group_chat},
+    )
+
+
+def test_admin_lists_reservations_across_all_rooms():
+    message("포고봇 예약 09:00", room="방1")
+    message("포고봇 예약 레이드아워 17:50", room="방2")
+
+    reply = _admin_message("포고봇 예약전체").json()["reply"]
+
+    assert "방1" in reply and "방2" in reply
+    assert "오늘 일정" in reply and "레이드아워" in reply
+
+
+def test_reservation_list_is_hidden_from_non_admins():
+    message("포고봇 예약 09:00", room="방1")
+
+    assert _admin_message("포고봇 예약전체", room="방1", sender="누군가").json()["reply"] is None
+    # 같은 이름이어도 그룹방이면 관리자가 아니다.
+    assert _admin_message("포고봇 예약전체", is_group_chat=True).json()["reply"] is None
+    # 클라이언트가 단독 여부를 안 보내면(기본값) 그룹으로 간주한다.
+    plain = client.post(
+        "/api/messages", json={"room": "이동호", "sender": "이동호", "message": "포고봇 예약전체"}
+    )
+    assert plain.json()["reply"] is None
