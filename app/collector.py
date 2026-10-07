@@ -266,18 +266,12 @@ def answer_question(question: str, context: str) -> str:
     """자유 질문에 답한다 - 일정 관련이면 등록된 일정 근거로, 그 외 일반 Pokemon GO
     지식(타입 상성 조합, 포켓몬 정보, 공략 등)이면 자체 지식으로 답한다.
 
-    수집(collect_events)은 AI_PROVIDER 설정을 따르지만, 여기는 수집용 Gemini
-    할당량을 안 쓰려고 항상 NVIDIA 무료 티어를 쓴다. NVIDIA 무료 티어는
-    느릴 수 있어(관측상 최대 몇 분) 호출부에서 백그라운드로 돌려야 한다.
+    수집(collect_events)은 AI_PROVIDER 설정을 따르지만, 여기는 AI_PROVIDER와
+    무관하게 항상 OpenAI(OPENAI_API_KEY, OPENAI_MODEL)를 쓴다.
     """
-    client = OpenAI(
-        api_key=os.environ["NVIDIA_API_KEY"],
-        base_url=NVIDIA_BASE_URL,
-        timeout=180.0,
-        max_retries=0,
-    )
+    client = OpenAI(timeout=180.0, max_retries=0)
     response = client.chat.completions.create(
-        model=os.getenv("NVIDIA_MODEL", "google/gemma-4-31b-it"),
+        model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
         messages=[
             {
                 "role": "system",
@@ -293,11 +287,10 @@ def answer_question(question: str, context: str) -> str:
             },
             {"role": "user", "content": f"등록된 일정:\n{context}\n\n질문: {question}"},
         ],
-        temperature=0.2,
     )
     content = response.choices[0].message.content
     if not content:
-        raise RuntimeError("NVIDIA returned no answer")
+        raise RuntimeError("OpenAI returned no answer")
     return content.strip()
 
 
