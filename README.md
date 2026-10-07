@@ -44,7 +44,7 @@
 
 ## 자유 질문 (AI 답변)
 
-위 명령어에 없는 질문은 `/포고봇 질문 [내용]`으로 물어보면 AI가 답합니다. 일정(이벤트 시작/종료, 보너스 등) 질문은 등록된 일정을 근거로 답하고, 그 외 일반 Pokemon GO 지식 질문(타입별 추천 포켓몬, 공략 등)은 AI 자체 지식으로 답합니다 - 다만 메타에 따라 바뀌는 내용(최고/추천 포켓몬 등)은 최신 정보와 다를 수 있다고 안내를 덧붙입니다. 수집용 `AI_PROVIDER` 설정과 무관하게 항상 OpenAI(`OPENAI_API_KEY`, `OPENAI_MODEL` 기본값 `gpt-5.4-mini`)를 씁니다 - Railway에 `OPENAI_API_KEY`가 설정돼 있어야 합니다. 전달 방식은 `/포고봇 수집`과 동일하게 두 단계 블로킹 호출(`/api/messages` 즉시 응답 + `await_ask: true` → `POST /api/ask` 긴 타임아웃 호출)입니다.
+위 명령어에 없는 질문은 `/포고봇 질문 [내용]`으로 물어보면 AI가 답합니다. 일정(이벤트 시작/종료, 보너스 등) 질문은 등록된 일정을 근거로 답하고, 그 외 일반 Pokemon GO 지식 질문(타입별 추천 포켓몬, 공략 등)은 AI 자체 지식으로 답합니다 - 다만 메타에 따라 바뀌는 내용(최고/추천 포켓몬 등)은 최신 정보와 다를 수 있다고 안내를 덧붙입니다. 수집용 `AI_PROVIDER` 설정과 무관하게 **Gemini를 가장 먼저** 시도하고(`GEMINI_API_KEY`), 실패하면(할당량 초과 등) 키가 설정된 OpenAI(`OPENAI_API_KEY`, `OPENAI_MODEL`), NVIDIA(`NVIDIA_API_KEY`, `NVIDIA_MODEL`) 순으로 넘어갑니다. 전달 방식은 `/포고봇 수집`과 동일하게 두 단계 블로킹 호출(`/api/messages` 즉시 응답 + `await_ask: true` → `POST /api/ask` 긴 타임아웃 호출)입니다.
 
 질문에 "티어/최고/베스트/순위/탑/추천" 같은 단어와 타입 이름이 같이 있으면(예: "불꽃 타입 최고 포켓몬"), 실제 티어리스트 사이트([pokebase.app](https://pokebase.app/pokemon-go/p/best-attackers-by-type))에서 수집해 캐시해둔 그 타입 상위 공격 포켓몬 목록을 근거로 덧붙여줍니다 - 작은 모델이 존재하지 않는 포켓몬 이름을 지어내는 문제(hallucination)를 줄이기 위함입니다. 이 캐시는 게임 밸런스 패치 주기에 맞춰 **한 달에 한 번**만 자동 갱신됩니다(`app/scheduler.py`가 매 정기 수집 때 갱신일을 확인). `POST /api/admin/tier-refresh`(관리자 토큰 필요)로 즉시 갱신할 수도 있습니다.
 

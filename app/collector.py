@@ -262,36 +262,96 @@ def _collect_with_nvidia(prompt: str, source_text: str) -> CollectedEvents:
     raise RuntimeError(f"NVIDIA returned invalid event data: {last_error}")
 
 
-def answer_question(question: str, context: str) -> str:
-    """자유 질문에 답한다 - 일정 관련이면 등록된 일정 근거로, 그 외 일반 Pokemon GO
-    지식(타입 상성 조합, 포켓몬 정보, 공략 등)이면 자체 지식으로 답한다.
+QUESTION_SYSTEM_PROMPT = (
+    "당신은 Pokemon GO 한국 안내 봇입니다. 한국어로 간결하게 답하세요. "
+    "일정(이벤트 시작/종료, 보너스, 레이드 로테이션 등) 질문은 아래 "
+    "등록된 일정만 근거로 답하고, 목록에 없으면 모른다고 답하세요. "
+    "그 외 일반 Pokemon GO 지식 질문(타입 상성, 포켓몬 스탯/추천 "
+    "포켓몬, 공략 등)은 등록된 일정과 무관하게 당신의 지식으로 답해도 "
+    "됩니다 - 다만 최고/추천 포켓몬처럼 메타에 따라 바뀌는 내용이면 "
+    "게임 업데이트로 최신 정보와 다를 수 있다고 짧게 덧붙이세요."
+)
 
-    수집(collect_events)은 AI_PROVIDER 설정을 따르지만, 여기는 AI_PROVIDER와
-    무관하게 항상 OpenAI(OPENAI_API_KEY, OPENAI_MODEL)를 쓴다.
-    """
-    client = OpenAI(timeout=180.0, max_retries=0)
+
+def _answer_with_gemini(user_prompt: str) -> str:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    response = client.models.generate_content(
+        model=_gemini_model(),
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=QUESTION_SYSTEM_PROMPT, temperature=0.2
+        ),
+    )
+    if not response.text:
+        raise RuntimeError("Gemini returned no answer")
+    return response.text.strip()
+
+
+def _answer_with_openai_compatible(client: OpenAI, model: str, user_prompt: str) -> str:
     response = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+        model=model,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "당신은 Pokemon GO 한국 안내 봇입니다. 한국어로 간결하게 답하세요. "
-                    "일정(이벤트 시작/종료, 보너스, 레이드 로테이션 등) 질문은 아래 "
-                    "등록된 일정만 근거로 답하고, 목록에 없으면 모른다고 답하세요. "
-                    "그 외 일반 Pokemon GO 지식 질문(타입 상성, 포켓몬 스탯/추천 "
-                    "포켓몬, 공략 등)은 등록된 일정과 무관하게 당신의 지식으로 답해도 "
-                    "됩니다 - 다만 최고/추천 포켓몬처럼 메타에 따라 바뀌는 내용이면 "
-                    "게임 업데이트로 최신 정보와 다를 수 있다고 짧게 덧붙이세요."
-                ),
-            },
-            {"role": "user", "content": f"등록된 일정:\n{context}\n\n질문: {question}"},
+            {"role": "system", "content": QUESTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
         ],
     )
     content = response.choices[0].message.content
     if not content:
-        raise RuntimeError("OpenAI returned no answer")
+        raise RuntimeError("AI returned no answer")
     return content.strip()
+
+
+def answer_question(question: str, context: str) -> str:
+    """자유 질문에 답한다 - 일정 관련이면 등록된 일정 근거로, 그 외 일반 Pokemon GO
+    지식(타입 상성 조합, 포켓몬 정보, 공략 등)이면 자체 지식으로 답한다.
+
+    AI_PROVIDER와 무관하게 Gemini를 가장 먼저 시도하고, 실패하면(할당량 초과 등)
+    키가 설정된 OpenAI, NVIDIA 순으로 넘어간다. 전부 실패하면 첫 오류를 던진다.
+    """
+    user_prompt = f"등록된 일정:\n{context}\n\n질문: {question}"
+    attempts = []
+    if os.getenv("GEMINI_API_KEY"):
+        attempts.append(("Gemini", lambda: _answer_with_gemini(user_prompt)))
+    if os.getenv("OPENAI_API_KEY"):
+        attempts.append(
+            (
+                "OpenAI",
+                lambda: _answer_with_openai_compatible(
+                    OpenAI(timeout=180.0, max_retries=0),
+                    os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+                    user_prompt,
+                ),
+            )
+        )
+    if os.getenv("NVIDIA_API_KEY"):
+        attempts.append(
+            (
+                "NVIDIA",
+                lambda: _answer_with_openai_compatible(
+                    OpenAI(
+                        api_key=os.environ["NVIDIA_API_KEY"],
+                        base_url=NVIDIA_BASE_URL,
+                        timeout=180.0,
+                        max_retries=0,
+                    ),
+                    os.getenv("NVIDIA_MODEL", "google/gemma-4-31b-it"),
+                    user_prompt,
+                ),
+            )
+        )
+    if not attempts:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    first_error: Exception | None = None
+    for name, attempt in attempts:
+        try:
+            return attempt()
+        except Exception as exc:
+            LOGGER.warning("%s 질문 답변 실패, 다음 공급자로 넘어갑니다: %s", name, exc)
+            if first_error is None:
+                first_error = exc
+    assert first_error is not None
+    raise first_error
 
 
 def build_source_text(now: datetime) -> str:
